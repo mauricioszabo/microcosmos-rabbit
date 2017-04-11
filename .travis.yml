@@ -1,7 +1,14 @@
 sudo: required
 language: clojure
 
+jdk:
+  - oraclejdk8
+
+services:
+  - docker
+
 script:
+  - docker run -d -p5672:5672 rabbitmq
   - lein midje
 
 deploy:
