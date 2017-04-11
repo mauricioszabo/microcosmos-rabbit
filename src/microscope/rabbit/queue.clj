@@ -145,27 +145,36 @@
                            :durable true
                            :ttl (* 24 60 60 1000)})
 
-(defn- real-rabbit-queue [name opts]
-  (let [opts (merge default-queue-params opts)
-        [connection channel] (connection-to-queue name (:prefetch-count opts))
-        dead-letter-name (str name "-dlx")
+(defn- define-queue [channel name opts]
+  (let [dead-letter-name (str name "-dlx")
         dead-letter-q-name (str name "-deadletter")]
-
     (queue/declare channel name (-> opts
-                                    (dissoc :max-retries :ttl :prefetch-count)
+                                    (dissoc :max-retries :ttl :prefetch-count :route-to)
                                     (assoc :arguments {"x-dead-letter-exchange" dead-letter-name
                                                        "x-message-ttl" (:ttl opts)})))
     (queue/declare channel dead-letter-q-name
                    {:durable true :auto-delete false :exclusive false})
+    (exchange/fanout channel dead-letter-name {:durable true})
+    (queue/bind channel dead-letter-q-name dead-letter-name)))
+
+(defn- route-exchange [channel exchange-name queue-names opts]
+  (doseq [queue-name queue-names]
+    (do
+      (define-queue channel queue-name opts)
+      (queue/bind channel queue-name exchange-name))))
+
+(defn- real-rabbit-queue [name opts]
+  (let [opts (merge default-queue-params opts)
+        [connection channel] (connection-to-queue name (:prefetch-count opts))]
+
+    (define-queue channel name opts)
 
     (if (:delayed opts)
       (exchange/declare channel name "x-delayed-message"
                         {:arguments {"x-delayed-type" "direct"}})
       (exchange/declare channel name "fanout"))
-    (queue/bind channel name name)
 
-    (exchange/fanout channel dead-letter-name {:durable true})
-    (queue/bind channel dead-letter-q-name dead-letter-name)
+    (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
 
 (def queues (atom {}))
