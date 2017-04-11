@@ -1,0 +1,18 @@
+sudo: required
+language: clojure
+
+script:
+  - lein midje
+
+deploy:
+  - provider: script
+    skip_cleanup: true
+    script: bash -c "lein change version str \"-SNAPSHOT\" && lein change :deploy-repositories concat '[[\"releases\" {:url \"https://clojars.org/repo/\" :username :env :password :env}]]'  && lein deploy releases"
+    on:
+      all_branches: true
+
+  - provider: script
+    skip_cleanup: true
+    script: bash -c "lein change :deploy-repositories concat '[[\"releases\" {:url \"https://clojars.org/repo/\" :username :env :password :env}]]'  && lein deploy releases"
+    on:
+      branch: master
