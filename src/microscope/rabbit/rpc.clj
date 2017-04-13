@@ -3,6 +3,7 @@
             [microscope.io :as io]
             [microscope.healthcheck :as health]
             [microscope.logging :as log]
+            [microscope.rabbit.mocks :as mocks]
             [langohr.basic :as basic]
             [langohr.core :as core]
             [langohr.consumers :as consumers]
@@ -40,52 +41,6 @@
     (rabbit/define-queue channel name opts)
     (->Queue channel name nil nil)))
 
-(def queues (atom {}))
-
-(declare mocked-rabbit-queue)
-(defrecord FakeQueue [name messages cid]
-  io/IO
-
-  (listen [self function]
-    (add-watch messages :watch (fn [_ _ _ actual]
-                                 (let [msg (peek actual)]
-                                   (when (and (not= msg :ACK)
-                                              (not= msg :REJECT))
-                                     (function msg))))))
-
-  (send! [_ {:keys [payload meta] :or {meta {}}}]
-         (let [response-queue (mocked-rabbit-queue (str name "-response") cid)]
-           (swap! (:messages response-queue)
-                  conj
-                  {:payload payload :meta (assoc meta :cid cid)})))
-
-  (ack! [_ _])
-  (reject! [_ _ _])
-  (log-message [_ _ _]))
-
-(defn clear-mocked-env! []
-  (doseq [[_ queue] @queues]
-    (remove-watch (:messages queue) :watch))
-  (reset! queues {}))
-
-(defn- mocked-rabbit-queue [name cid]
-  (let [name-k (keyword name)
-        mock-queue (get @queues name-k (->FakeQueue name (atom []) cid))]
-    (swap! queues assoc name-k mock-queue)
-    mock-queue))
-
-(defn queue [name & {:as opts}]
-  (let [queue (delay (real-rabbit-queue name opts))]
-    (clear-mocked-env!)
-    (fn [{:keys [cid mocked meta]}]
-      (if mocked
-        (mocked-rabbit-queue name cid)
-        (assoc @queue :cid cid :original-meta meta)))))
-
-(defn mock-call [queue-name arg]
-  (swap! (:messages (mocked-rabbit-queue queue-name {:cid "DONT_MATTER"}))
-         conj {:payload arg}))
-
 (defn- caller-fn [queue timeout-milis last-message]
   (fn [cid arg]
     (let [correlation-id (str (gensym))
@@ -121,13 +76,17 @@
                          {:auto-ack true})
     (caller-fn queue (-> params :timeout (or 5000)) last-message)))
 
-(defn- mock-response-of [name responses]
-  (get responses (keyword name) (fn [a] (throw (ex-info "RPC not mocked!" {:name name
-                                                                           :arg a})))))
+(defn queue [name & {:as opts}]
+  (let [queue (delay (real-rabbit-queue name opts))]
+    (mocks/clear-mocked-env!)
+    (fn [{:keys [cid mocked meta]}]
+      (if mocked
+        (mocks/mocked-rabbit-queue name cid true false)
+        (assoc @queue :cid cid :original-meta meta)))))
 
 (defn caller [name & {:as args}]
   (let [caller (delay (create-caller name args))]
     (fn [params]
       (if (:mocked params)
-        (mock-response-of name (:rpc-responses params))
+        (mocks/rpc-response-of name (:rpc-responses params))
         (partial @caller (:cid params))))))

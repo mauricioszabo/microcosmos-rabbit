@@ -36,3 +36,11 @@
   (doseq [[_ queue] @queues]
     (remove-watch (:messages queue) :watch))
   (reset! queues {}))
+
+(defn rpc-call [queue-name arg]
+  (swap! (:messages (mocked-rabbit-queue queue-name "DONT_MATTER" true false))
+         conj {:payload arg}))
+
+(defn rpc-response-of [name responses]
+  (get responses (keyword name) (fn [a] (throw (ex-info "RPC not mocked!" {:name name
+                                                                           :arg a})))))

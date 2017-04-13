@@ -3,6 +3,7 @@
             [microscope.rabbit.rpc :as rpc]
             [microscope.io :as io]
             [microscope.rabbit.queue :as rabbit]
+            [microscope.rabbit.mocks :as mocks]
             [microscope.future :as future]
             [microscope.core :as components]))
 
@@ -35,8 +36,8 @@
                                                             {:payload (inc %)})))))
 
       (fact "will publish to a mocked response queue"
-        (rpc/mock-call :rpc 10)
-        (-> @rpc/queues :rpc-response :messages deref last :payload) => 11))))
+        (mocks/rpc-call :rpc 10)
+        (-> @rabbit/queues :rpc-response :messages deref last :payload) => 11))))
 
 (fact "when mocking client"
   (components/mocked
