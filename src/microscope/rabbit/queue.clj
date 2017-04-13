@@ -6,6 +6,7 @@
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.logging :as log]
+            [microscope.rabbit.mocks :as mocks]
             [langohr.basic :as basic]
             [langohr.channel :as channel]
             [langohr.consumers :as consumers]
@@ -179,42 +180,7 @@
     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
 
-(def queues (atom {}))
-
-(defrecord FakeQueue [messages cid delayed]
-  io/IO
-
-  (listen [self function]
-    (add-watch messages :watch (fn [_ _ _ actual]
-                                 (let [msg (peek actual)]
-                                   (when (and (not= msg :ACK)
-                                              (not= msg :REJECT)
-                                              (not (and delayed
-                                                        (some-> meta :x-delay (> 0)))))
-                                     (function msg))))))
-
-  (send! [_ {:keys [payload meta] :or {meta {}}}]
-    (when-not (and delayed (some-> meta :x-delay (> 0)))
-      (swap! messages conj {:payload payload :meta (assoc meta :cid cid)})))
-
-  (ack! [_ {:keys [meta]}]
-    (swap! messages conj :ACK))
-
-  (reject! [self msg ex]
-    (swap! messages conj :REJECT))
-
-  (log-message [_ _ _]))
-
-(defn- mocked-rabbit-queue [name cid delayed]
-  (let [name-k (keyword name)
-        mock-queue (get @queues name-k (->FakeQueue (atom []) cid delayed))]
-    (swap! queues assoc name-k mock-queue)
-    mock-queue))
-
-(defn clear-mocked-env! []
-  (doseq [[_ queue] @queues]
-    (remove-watch (:messages queue) :watch))
-  (reset! queues {}))
+(def queues mocks/queues)
 
 (defn queue
   "Defines a new RabbitMQ's connection. Valid params ar `:exclusive`, `:auto-delete`,
@@ -229,9 +195,9 @@ parameters:
   'send all messages'.
 "
   [name & {:as opts}]
-  (clear-mocked-env!)
+  (mocks/clear-mocked-env!)
   (let [queue (delay (real-rabbit-queue name opts))]
     (fn [{:keys [cid mocked]}]
       (if mocked
-        (mocked-rabbit-queue name cid (:delayed opts))
+        (mocks/mocked-rabbit-queue name cid false (:delayed opts))
         (assoc @queue :cid cid)))))
