@@ -1,6 +1,7 @@
 (ns microscope.rabbit.rpc-test
   (:require [midje.sweet :refer :all]
             [microscope.rabbit.rpc :as rpc]
+            [microscope.io :as io]
             [microscope.rabbit.queue :as rabbit]
             [microscope.future :as future]
             [microscope.core :as components]))
@@ -10,7 +11,7 @@
         handler (fn [f-msg {:keys [increment]}]
                   (->> f-msg
                        (future/map (comp inc :payload))
-                       (future/intercept #(rpc/deliver! increment %))))
+                       (future/intercept #(io/send! increment {:payload %}))))
         rpc-constructor (rpc/caller "increment")
         rpc (rpc-constructor {:cid "FOOBAR"})]
 
@@ -20,8 +21,6 @@
     (subs :increment handler)
 
     (fact "will call RPC function"
-      (rpc 10) => 11))
+      (rpc 20) => 21))
   (background
-   (after :facts (do
-                   (rabbit/disconnect!)
-                   (reset! rabbit/connections {})))))
+   (after :facts (rabbit/disconnect!))))
