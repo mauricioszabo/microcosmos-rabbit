@@ -37,7 +37,7 @@
 
       (fact "will publish to a mocked response queue"
         (mocks/rpc-call :rpc 10)
-        (-> @rabbit/queues :rpc-response :messages deref last :payload) => 11))))
+        (-> @mocks/queues :rpc-response :messages deref last :payload) => 11))))
 
 (fact "when mocking client"
   (components/mocked
@@ -52,4 +52,4 @@
 
       (fact "calls mocked remove function"
         (io/send! (:some-queue @rabbit/queues) {:payload 90}))
-      (-> @rabbit/queues :response :messages deref last :payload) => 92)))
+      (-> @mocks/queues :response :messages deref last :payload) => 92)))
