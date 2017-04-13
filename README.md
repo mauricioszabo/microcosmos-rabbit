@@ -1,5 +1,7 @@
 # Microscope's RabbitMQ
 
+[![Build Status](https://travis-ci.org/acessocard/microscope-rabbit.svg?branch=master)](https://travis-ci.org/acessocard/microscope-rabbit)
+
 Support for RabbitMQ for Microscope.
 
 RabbitMQ's implementation implements Microscope's IO and Healthcheck interface. Its `ack`
