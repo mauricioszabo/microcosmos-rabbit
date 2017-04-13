@@ -33,8 +33,6 @@
   (unhealthy? [_] (when (core/closed? channel)
                     {:channel "is closed"})))
 
-(defn deliver! [queue payload])
-
 (defn- real-rabbit-queue [name opts]
   (let [opts (merge rabbit/default-queue-params opts)
         [connection channel] (rabbit/connection-to-queue name (:prefetch-count opts))]
