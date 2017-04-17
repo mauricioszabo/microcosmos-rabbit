@@ -11,9 +11,19 @@ script:
   - docker run -d -p5672:5672 rabbitmq
   - lein midje
 
+before_install:
+  - if [ ! -z "$GPG_SECRET_KEYS" ]; then echo $GPG_SECRET_KEYS | base64 --decode | gpg --import; fi
+  - if [ ! -z "$GPG_OWNERTRUST" ]; then echo $GPG_OWNERTRUST | base64 --decode | gpg --import-ownertrust; fi
+
 deploy:
   - provider: script
     skip_cleanup: true
-    script: bash -c "lein change :deploy-repositories concat '[[\"releases\" {:url \"https://clojars.org/repo/\" :username :env :password :env}]]'  && lein deploy releases"
+    script: scripts/deploy.sh
     on:
       tags: true
+
+  - provider: script
+    skip_cleanup: true
+    script: scripts/deploy.sh
+    on:
+      branch: master
