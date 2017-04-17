@@ -4,6 +4,7 @@
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.rabbit.queue :as rabbit]
+            [microscope.rabbit.mocks :as mocks]
             [microscope.logging :as log]
             [cheshire.core :as json]
             [langohr.core :as core]
@@ -149,14 +150,14 @@
   (fact "subscribes correctly to messages"
     (components/mocked
       (a-function (rabbit/queue "test"))
-      (io/send! (:test @rabbit/queues) {:payload "message"})
-      (-> @rabbit/queues :test-result :messages deref)
+      (io/send! (:test @mocks/queues) {:payload "message"})
+      (-> @mocks/queues :test-result :messages deref)
       => (just [(contains {:payload "MESSAGE"})])))
 
   (fact "ignores delayed messages"
     (components/mocked
       (a-function (rabbit/queue "test" :delayed true))
-      (io/send! (:test @rabbit/queues) {:payload "msg one"})
-      (io/send! (:test @rabbit/queues) {:payload "msg two", :meta {:x-delay 400}})
-      (-> @rabbit/queues :test-result :messages deref)
+      (io/send! (:test @mocks/queues) {:payload "msg one"})
+      (io/send! (:test @mocks/queues) {:payload "msg two", :meta {:x-delay 400}})
+      (-> @mocks/queues :test-result :messages deref)
       => (just [(contains {:payload "MSG ONE"})]))))

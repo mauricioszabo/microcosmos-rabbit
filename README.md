@@ -22,7 +22,7 @@ environment
 ```clojure
 (require '[microscope.core :as components]
          '[microscope.future :as future]
-         '[microscope.queue.rabbit :as rabbit])
+         '[microscope.rabbit.queue :as rabbit])
 
 
 (defn increment [n] (inc n))
@@ -41,6 +41,60 @@ environment
                       (future/map #(publish-to (:result components) %)))))))
 ```
 
+## RPC Usage
+
+RabbitMQ supports "RPC" messages. They are implemented using a virtual queue, one that we
+subscribe on the caller, then implement on the server (replying for the message to the
+`:reply-to` metadata).
+
+We support it using a special namespace - `microscope.rabbit.rpc` - and publishing the
+result to the same queue we're listening. `microscope.rabbit` will do the routing for us
+
+One simple example is the following:
+
+```clojure
+;; SERVER SIDE:
+(require '[microscope.core :as components]
+         '[microscope.future :as future]
+         '[microscope.rabbit.rpc :as rpc])
+
+(defn publish-to [queue result]
+  (components/send! queue {:payload result}))
+
+(defn main- [ & args]
+  (let [subscribe (subscribe-with :increment (rpc/queue "increment"))
+    (subscribe :increment
+               (fn [future-n components]
+                 (->> future-n
+                      (future/map :payload)
+                      (future/map inc)
+                      (future/map #(publish-to (:increment components) %)))))))
+
+;; CLIENT SIDE
+;; We call the RPC as a function - everything is abstracted for us
+(require '[microscope.core :as components]
+         '[microscope.future :as future]
+         '[microscope.rabbit.queue :as queue]
+         '[microscope.rabbit.rpc :as rpc])
+
+(defn call-rpc-function [rpc-fn number]
+  (rpc-fn number))
+
+(defn publish-to [queue result]
+  (components/send! queue {:payload result}))
+
+(defn main- [ & args]
+  (let [subscribe (subscribe-with :some-queue (rabbit/queue "queue")
+                                  :rpc-fun (rpc/caller "increment")
+                                  :other-queue (rabbit/queue "other"))
+    (subscribe :some-queue
+               (fn [future-n components]
+                 (->> future-n
+                      (future/map :payload)
+                      (future/map #(call-rpc-function (:rpc-fun components) %)
+                      (future/map #(publish-to (:other-queue components) %))))))))
+
+```
 ## Configuration
 
 RabbitMQ's configuration is made entirely of two environment variables. First one

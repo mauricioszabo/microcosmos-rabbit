@@ -6,6 +6,7 @@
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.logging :as log]
+            [microscope.rabbit.mocks :as mocks]
             [langohr.basic :as basic]
             [langohr.channel :as channel]
             [langohr.consumers :as consumers]
@@ -39,7 +40,7 @@
                      (into {}))]
     (apply dissoc headers (map name rabbit-default-meta))))
 
-(defn- parse-payload [payload]
+(defn parse-payload [payload]
   (-> payload (String. "UTF-8") io/deserialize-msg))
 
 (defn- retries-so-far [meta]
@@ -67,7 +68,7 @@
                          (requeue-msg queue payload meta)
                          (ack-msg queue meta)))))
 
-(defn- callback-payload [callback max-retries self _ meta payload]
+(defn callback-payload [callback max-retries self _ meta payload]
   (let [retries (retries-so-far meta)
         reject-msg #(basic/reject (:channel self) (:delivery-tag meta) false)]
     (if (:redelivery? meta)
@@ -125,7 +126,7 @@
       conn
       (get (swap! connections assoc host (connect!)) host))))
 
-(defn- connection-to-queue [queue-name prefetch-count]
+(defn connection-to-queue [queue-name prefetch-count]
   (let [queue-host (get-in rabbit-config [:queues (keyword queue-name)])]
     (if queue-host
       (connection-to-host (keyword queue-host) prefetch-count)
@@ -133,8 +134,10 @@
 
 (defn disconnect! []
   (doseq [[_ [connection channel]] @connections]
-    (core/close channel)
-    (core/close connection))
+    (try
+      (core/close channel)
+      (core/close connection)
+      (catch com.rabbitmq.client.AlreadyClosedException _)))
   (reset! connections {}))
 
 (def default-queue-params {:exclusive false
@@ -145,7 +148,7 @@
                            :durable true
                            :ttl (* 24 60 60 1000)})
 
-(defn- define-queue [channel name opts]
+(defn define-queue [channel name opts]
   (let [dead-letter-name (str name "-dlx")
         dead-letter-q-name (str name "-deadletter")]
     (queue/declare channel name (-> opts
@@ -177,42 +180,7 @@
     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
 
-(def queues (atom {}))
-
-(defrecord FakeQueue [messages cid delayed]
-  io/IO
-
-  (listen [self function]
-    (add-watch messages :watch (fn [_ _ _ actual]
-                                 (let [msg (peek actual)]
-                                   (when (and (not= msg :ACK)
-                                              (not= msg :REJECT)
-                                              (not (and delayed
-                                                        (some-> meta :x-delay (> 0)))))
-                                     (function msg))))))
-
-  (send! [_ {:keys [payload meta] :or {meta {}}}]
-    (when-not (and delayed (some-> meta :x-delay (> 0)))
-      (swap! messages conj {:payload payload :meta (assoc meta :cid cid)})))
-
-  (ack! [_ {:keys [meta]}]
-    (swap! messages conj :ACK))
-
-  (reject! [self msg ex]
-    (swap! messages conj :REJECT))
-
-  (log-message [_ _ _]))
-
-(defn- mocked-rabbit-queue [name cid delayed]
-  (let [name-k (keyword name)
-        mock-queue (get @queues name-k (->FakeQueue (atom []) cid delayed))]
-    (swap! queues assoc name-k mock-queue)
-    mock-queue))
-
-(defn clear-mocked-env! []
-  (doseq [[_ queue] @queues]
-    (remove-watch (:messages queue) :watch))
-  (reset! queues {}))
+(def ^:deprecated queues mocks/queues)
 
 (defn queue
   "Defines a new RabbitMQ's connection. Valid params ar `:exclusive`, `:auto-delete`,
@@ -227,9 +195,9 @@ parameters:
   'send all messages'.
 "
   [name & {:as opts}]
-  (clear-mocked-env!)
+  (mocks/clear-mocked-env!)
   (let [queue (delay (real-rabbit-queue name opts))]
     (fn [{:keys [cid mocked]}]
       (if mocked
-        (mocked-rabbit-queue name cid (:delayed opts))
+        (mocks/mocked-rabbit-queue name cid false (:delayed opts))
         (assoc @queue :cid cid)))))

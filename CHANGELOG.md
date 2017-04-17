@@ -1,3 +1,7 @@
+# 0.1.2
+* RPC support for RabbitMQ
+* Deprecated mocked queues `rabbit/queues` in favor of `mocks/queues`
+
 # 0.1.1
 * Adding multi-route (one exchange routing to multiple queues) option
 
