@@ -108,6 +108,28 @@
     (before :facts (prepare-tests))
     (after :facts (rabbit/disconnect!))))
 
+(facts "multi-routing messages"
+  (let [p1 (promise)
+        p2 (promise)
+        first-q (rabbit/queue "first-queue" :auto-delete true :route-to ["second-q"
+                                                                         "third-q"])
+        second-q (rabbit/queue "second-q" :auto-delete true)
+        third-q (rabbit/queue "third-q" :auto-delete true)
+        sub (components/subscribe-with :first-q first-q
+                                       :second-q second-q
+                                       :third-q third-q)]
+    (sub :second-q (fn [f-msg {:keys [second-q]}]
+                     (future/map #(deliver p1 (:payload %)) f-msg)))
+    (sub :third-q (fn [f-msg {:keys [second-q]}]
+                    (future/map #(deliver p2 (:payload %)) f-msg)))
+
+    (io/send! (first-q {:cid "FOO"}) {:payload "some-msg"})
+    (deref p1 500 :TIMEOUT) => "some-msg"
+    (deref p2 500 :TIMEOUT) => "some-msg")
+
+  (against-background
+    (after :facts (rabbit/disconnect!))))
+
 ; Mocks
 (defn a-function [test-q]
   (let [extract-payload :payload
