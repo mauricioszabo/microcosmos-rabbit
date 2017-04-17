@@ -1,6 +1,8 @@
 # Microscope's RabbitMQ
 
 [![Build Status](https://travis-ci.org/acessocard/microscope-rabbit.svg?branch=master)](https://travis-ci.org/acessocard/microscope-rabbit)
+[![Clojars Project](https://img.shields.io/clojars/v/microscope/rabbit.svg)](https://clojars.org/microscope/rabbit)
+
 
 Support for RabbitMQ for Microscope.
 
