@@ -183,7 +183,7 @@
 (def ^:deprecated queues mocks/queues)
 
 (defn queue
-  "Defines a new RabbitMQ's connection. Valid params ar `:exclusive`, `:auto-delete`,
+  "Defines a new RabbitMQ's connection. Valid params are `:exclusive`, `:auto-delete`,
 `:durable` and `:ttl`, all from Rabbit's documentation. We support additional
 parameters:
 
@@ -193,6 +193,13 @@ parameters:
   rabbit will send ALL messages to us - this is undesirable in most cases. So,
   we implement this as number-of-processors * 5. Changing it to `0` means
   'send all messages'.
+- :route-to is a vector of strings. When we publish to this queue, it'll route to
+  queue names defined in the vector. 
+
+In truth, this function defines an exchange with name defined by `name`. If we pass
+`:route-to`, it'll define every queue inside the vector and binds the exchange to each
+one, using *fanout*. If `:route-to` is omitted, it creates a queue with the same name
+as the exchange, then binds one to another.
 "
   [name & {:as opts}]
   (mocks/clear-mocked-env!)
