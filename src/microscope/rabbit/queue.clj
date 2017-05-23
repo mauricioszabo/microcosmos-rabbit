@@ -7,13 +7,13 @@
             [microscope.future :as future]
             [microscope.logging :as log]
             [microscope.rabbit.mocks :as mocks]
+            [microscope.env :as env]
             [langohr.basic :as basic]
             [langohr.channel :as channel]
             [langohr.consumers :as consumers]
             [langohr.core :as core]
             [langohr.exchange :as exchange]
-            [langohr.queue :as queue]
-            [environ.core :refer [env]])
+            [langohr.queue :as queue])
   (:import [com.rabbitmq.client LongString]
            [com.fasterxml.jackson.core JsonParseException]))
 
@@ -114,8 +114,8 @@
 
 (defonce connections (atom {}))
 
-(def ^:private rabbit-config {:hosts (-> env :rabbit-config (json/parse-string true))
-                              :queues (-> env :rabbit-queues (json/parse-string true))})
+(def ^:private rabbit-config {:hosts (-> env/secret-or-env :rabbit-config (json/parse-string true))
+                              :queues (-> env/secret-or-env :rabbit-queues (json/parse-string true))})
 
 (defn- connection-to-host [host prefetch-count]
   (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))
