@@ -114,8 +114,8 @@
 
 (defonce connections (atom {}))
 
-(def ^:private rabbit-config {:hosts (-> env/secret-or-env :rabbit-config (json/parse-string true))
-                              :queues (-> env/secret-or-env :rabbit-queues (json/parse-string true))})
+(def ^:private rabbit-config {:hosts (-> :rabbit-config env/secret-or-env (json/parse-string true))
+                              :queues (-> :rabbit-queues env/secret-or-env (json/parse-string true))})
 
 (defn- connection-to-host [host prefetch-count]
   (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))
