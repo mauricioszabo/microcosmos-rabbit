@@ -15,11 +15,13 @@
                                      (function msg))))))
 
   (send! [self {:keys [payload meta] :or {meta {}}}]
-    (when-not (and delayed? (some-> meta :x-delay (> 0)))
-      (let [queue (if rpc?
-                    (mocked-rabbit-queue (str name "-response") cid rpc? delayed?)
-                    self)]
-        (swap! (:messages queue) conj {:payload payload :meta (assoc meta :cid cid)}))))
+    (let [json-payload (-> payload io/serialize-msg io/deserialize-msg)]
+      (when-not (and delayed? (some-> meta :x-delay (> 0)))
+        (let [queue (if rpc?
+                      (mocked-rabbit-queue (str name "-response") cid rpc? delayed?)
+                      self)]
+          (swap! (:messages queue) conj {:payload json-payload
+                                         :meta (assoc meta :cid cid)})))))
 
   (ack! [_ {:keys [meta]}])
   (reject! [self msg ex])
