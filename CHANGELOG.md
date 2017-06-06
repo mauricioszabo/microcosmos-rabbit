@@ -1,3 +1,6 @@
+# 0.1.5
+* Mocked environments will serialize and deserialize JSON message.
+
 # 0.1.2
 * RPC support for RabbitMQ
 * Deprecated mocked queues `rabbit/queues` in favor of `mocks/queues`

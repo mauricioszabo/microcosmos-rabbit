@@ -154,6 +154,17 @@
       (-> @mocks/queues :test-result :messages deref)
       => (just [(contains {:payload "MESSAGE"})])))
 
+  (fact "checks if message is json-serializable"
+    (components/mocked
+      (a-function (rabbit/queue "test"))
+      (io/send! (:test @mocks/queues) {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
+      (->> @mocks/queues :test :messages deref (map :payload))
+      => [{:dt "2010-10-20T10:00:00Z"}]
+
+      (io/send! (:test @mocks/queues) {:payload {:obj (Object.)}}) => throws
+      (->> @mocks/queues :test :messages deref (map :payload))
+      => [{:dt "2010-10-20T10:00:00Z"}]))
+
   (fact "ignores delayed messages"
     (components/mocked
       (a-function (rabbit/queue "test" :delayed true))
