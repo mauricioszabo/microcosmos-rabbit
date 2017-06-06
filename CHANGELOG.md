@@ -1,3 +1,7 @@
+# 0.1.5
+* Add message's queue name into log metadata
+* Remove "msg" root key from log metadata
+
 # 0.1.2
 * RPC support for RabbitMQ
 * Deprecated mocked queues `rabbit/queues` in favor of `mocks/queues`
