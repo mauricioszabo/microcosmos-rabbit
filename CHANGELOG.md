@@ -1,4 +1,6 @@
 # 0.1.5
+* Add message's queue name into log metadata
+* Remove "msg" root key from log metadata
 * Mocked environments will serialize and deserialize JSON message.
 
 # 0.1.2

@@ -100,7 +100,8 @@
         (basic/ack channel (:delivery-tag meta)))
 
   (log-message [_ logger msg]
-               (log/info logger "Processing message" :msg msg))
+    (let [data (assoc msg :queue-name name)]
+      (apply log/info logger "Processing message" (flatten (seq data)))))
 
   (reject! [self msg _]
            (let [meta (:meta msg)
