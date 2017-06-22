@@ -16,9 +16,6 @@
         rpc-constructor (rpc/caller "increment")
         rpc (rpc-constructor {:cid "FOOBAR"})]
 
-    (alter-var-root #'rabbit/rabbit-config
-                    (constantly {:queues {:increment "127.0.0.1"}
-                                 :hosts nil}))
     (subs :increment handler)
 
     (fact "will call RPC function"
