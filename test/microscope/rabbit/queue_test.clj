@@ -23,7 +23,12 @@
                   (io/send! result-q value)))
               fut-value))
 
-(def logger (reify log/Log (log [_ _ type _] nil)))
+(def logger-msgs (atom nil))
+(defn logger-gen [{:keys [cid]}]
+  (reset! logger-msgs [])
+  (reify log/Log
+    (log [_ msg type data]
+      (swap! logger-msgs conj (assoc data :message msg :type type :cid cid)))))
 
 (defn in-future [f]
   (fn [future _]
@@ -35,7 +40,7 @@
         channel (:channel (result-queue {}))
         deadletter-queue (fn [_] (rabbit/->Queue channel "test-deadletter" 1000 "FOO"))
         sub (components/subscribe-with :result-q result-queue
-                                       :logger (fn [_] logger)
+                                       :logger logger-gen
                                        :test-queue test-queue
                                        :result-queue result-queue
                                        :deadletter-queue deadletter-queue)]
@@ -79,6 +84,14 @@
   (fact "handles message if successful"
     (:payload (send-and-wait {:payload {:some "msg"}})) => {:some "msg"})
 
+  (facts "logs that we're processing a message"
+    (send-and-wait {:payload {:some "msg"}})
+    (first @logger-msgs) => (just {:message "Processing message"
+                                   :type :info
+                                   :cid ..cid..
+                                   :payload "{\"some\":\"msg\"}"
+                                   :meta #"\"queue\":\"test-result\""}))
+
   (fact "attaches metadata into msg"
     (:meta (send-and-wait {:payload {:some "msg"}, :meta {:a 10}}))
     => (contains {:a 10, :cid "FOO.BAR"}))
@@ -89,7 +102,7 @@
   (against-background
    (components/generate-cid nil) => "FOO"
    (components/generate-cid "FOO") => "FOO.BAR"
-   (components/generate-cid "FOO.BAR") => ..irrelevant..
+   (components/generate-cid "FOO.BAR") => ..cid..
    (before :facts (prepare-tests))
    (after :facts (rabbit/disconnect!))))
 
@@ -135,7 +148,7 @@
         upcases #(clojure.string/upper-case %)
         publish #(io/send! %2 {:payload %1})
         sub (components/subscribe-with :result-q (rabbit/queue "test-result" :auto-delete true)
-                                       :logger (fn [_] logger)
+                                       :logger logger-gen
                                        :test-q test-q)]
 
     (sub :test-q (fn [msg {:keys [result-q]}]
@@ -152,14 +165,10 @@
       (-> @mocks/queues :test-result :messages deref)
       => (just [(contains {:payload "MESSAGE"})])))
 
-  (fact "checks if message is json-serializable"
+  (fact "serializes message before sending it to mocked queue"
     (components/mocked
       (a-function (rabbit/queue "test"))
       (io/send! (:test @mocks/queues) {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
-      (->> @mocks/queues :test :messages deref (map :payload))
-      => [{:dt "2010-10-20T10:00:00Z"}]
-
-      (io/send! (:test @mocks/queues) {:payload {:obj (Object.)}}) => throws
       (->> @mocks/queues :test :messages deref (map :payload))
       => [{:dt "2010-10-20T10:00:00Z"}]))
 

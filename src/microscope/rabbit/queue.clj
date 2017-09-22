@@ -98,9 +98,11 @@
   (ack! [_ {:keys [meta]}]
         (basic/ack channel (:delivery-tag meta)))
 
-  (log-message [_ logger msg]
-    (let [data (assoc msg :queue-name name)]
-      (apply log/info logger "Processing message" (flatten (seq data)))))
+  (log-message [_ logger {:keys [payload meta]}]
+    (let [meta (assoc meta :queue name)]
+      (log/info logger "Processing message"
+                :payload (io/serialize-msg payload)
+                :meta (io/serialize-msg meta))))
 
   (reject! [self msg _]
            (let [meta (:meta msg)
