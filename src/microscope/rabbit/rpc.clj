@@ -23,8 +23,10 @@
   (ack! [_ {:keys [meta]}]
         (basic/ack channel (:delivery-tag meta)))
 
-  (log-message [_ logger msg]
-               (log/info logger "Processing RPC message" :msg msg))
+  (log-message [_ logger {:keys [payload meta]}]
+    (log/info logger "Processing RPC message"
+              :payload (io/serialize-msg payload)
+              :meta (io/serialize-msg meta)))
 
   (reject! [self msg _]
            (basic/reject channel (-> msg :meta :delivery-tag) false))
