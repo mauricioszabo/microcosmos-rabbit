@@ -23,7 +23,7 @@
           (swap! (:messages queue) conj {:payload json-payload
                                          :meta (assoc meta :cid cid)})))))
 
-  (ack! [_ {:keys [meta]}])
+  (ack! [_ _])
   (reject! [self msg ex])
   (log-message [_ _ _]))
 

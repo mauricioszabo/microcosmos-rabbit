@@ -68,9 +68,8 @@
                          (requeue-msg queue payload meta)
                          (ack-msg queue meta)))))
 
-(defn callback-payload [callback max-retries self _ meta payload]
-  (let [retries (retries-so-far meta)
-        reject-msg #(basic/reject (:channel self) (:delivery-tag meta) false)]
+(defn callback-payload [callback self meta payload]
+  (let [reject-msg #(basic/reject (:channel self) (:delivery-tag meta) false)]
     (if (:redelivery? meta)
       (reject-or-requeue self meta payload)
       (let [payload (try (parse-payload payload) (catch JsonParseException _ :INVALID))]
@@ -87,7 +86,7 @@
 (defrecord Queue [channel name max-retries cid]
   io/IO
   (listen [self function]
-          (let [callback (partial callback-payload function max-retries self)]
+          (let [callback #(callback-payload function self %2 %3)]
             (consumers/subscribe channel name callback)))
 
   (send! [_ {:keys [payload meta] :or {meta {}}}]
@@ -99,9 +98,11 @@
   (ack! [_ {:keys [meta]}]
         (basic/ack channel (:delivery-tag meta)))
 
-  (log-message [_ logger msg]
-    (let [data (assoc msg :queue-name name)]
-      (apply log/info logger "Processing message" (flatten (seq data)))))
+  (log-message [_ logger {:keys [payload meta]}]
+    (let [meta (assoc meta :queue name)]
+      (log/info logger "Processing message"
+                :payload (io/serialize-msg payload)
+                :meta (io/serialize-msg meta))))
 
   (reject! [self msg _]
            (let [meta (:meta msg)
@@ -169,7 +170,7 @@
 
 (defn- real-rabbit-queue [name opts]
   (let [opts (merge default-queue-params opts)
-        [connection channel] (connection-to-queue name (:prefetch-count opts))]
+        [_ channel] (connection-to-queue name (:prefetch-count opts))]
 
     (define-queue channel name opts)
 
@@ -180,8 +181,6 @@
 
     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
-
-(def ^:deprecated queues mocks/queues)
 
 (defn queue
   "Defines a new RabbitMQ's connection. Valid params are `:exclusive`, `:auto-delete`,
@@ -195,7 +194,7 @@ parameters:
   we implement this as number-of-processors * 5. Changing it to `0` means
   'send all messages'.
 - :route-to is a vector of strings. When we publish to this queue, it'll route to
-  queue names defined in the vector. 
+  queue names defined in the vector.
 
 In truth, this function defines an exchange with name defined by `name`. If we pass
 `:route-to`, it'll define every queue inside the vector and binds the exchange to each
