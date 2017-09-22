@@ -180,8 +180,6 @@
     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
 
-(def ^:deprecated queues mocks/queues)
-
 (defn queue
   "Defines a new RabbitMQ's connection. Valid params are `:exclusive`, `:auto-delete`,
 `:durable` and `:ttl`, all from Rabbit's documentation. We support additional
