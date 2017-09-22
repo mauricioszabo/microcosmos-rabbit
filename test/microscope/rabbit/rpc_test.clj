@@ -8,7 +8,7 @@
             [microscope.core :as components]))
 
 (fact "will create a RPC client"
-  (let [subs (components/subscribe-with :increment (rpc/queue "increment"))
+  (let [sub (components/subscribe-with :increment (rpc/queue "increment"))
         handler (fn [f-msg {:keys [increment]}]
                   (->> f-msg
                        (future/map (comp inc :payload))
@@ -16,7 +16,7 @@
         rpc-constructor (rpc/caller "increment")
         rpc (rpc-constructor {:cid "FOOBAR"})]
 
-    (subs :increment handler)
+    (sub :increment handler)
 
     (fact "will call RPC function"
       (rpc 20) => 21))
@@ -25,12 +25,12 @@
 
 (facts "when mocking server"
   (components/mocked
-    (let [subs (components/subscribe-with :rpc-server (rpc/queue "rpc"))]
-      (subs :rpc-server (fn [f-val {:keys [rpc-server]}]
-                          (->> f-val
-                               (future/map :payload)
-                               (future/intercept #(io/send! rpc-server
-                                                            {:payload (inc %)})))))
+    (let [sub (components/subscribe-with :rpc-server (rpc/queue "rpc"))]
+      (sub :rpc-server (fn [f-val {:keys [rpc-server]}]
+                         (->> f-val
+                              (future/map :payload)
+                              (future/intercept #(io/send! rpc-server
+                                                           {:payload (inc %)})))))
 
       (fact "will publish to a mocked response queue"
         (mocks/rpc-call :rpc 10)
@@ -39,14 +39,14 @@
 (fact "when mocking client"
   (components/mocked
     {:rpc-responses {:rpc #(+ 2 %)}}
-    (let [subs (components/subscribe-with :caller (rpc/caller "rpc")
-                                          :queue (rabbit/queue "some-queue")
-                                          :response (rabbit/queue "response"))]
-      (subs :queue (fn [f-value {:keys [response caller]}]
-                     (->> f-value
-                          (future/map #(caller (:payload %)))
-                          (future/intercept #(io/send! response {:payload %})))))
+    (let [sub (components/subscribe-with :caller (rpc/caller "rpc")
+                                         :queue (rabbit/queue "some-queue")
+                                         :response (rabbit/queue "response"))]
+      (sub :queue (fn [f-value {:keys [response caller]}]
+                    (->> f-value
+                         (future/map #(caller (:payload %)))
+                         (future/intercept #(io/send! response {:payload %})))))
 
       (fact "calls mocked remove function"
-        (io/send! (:some-queue @rabbit/queues) {:payload 90}))
+        (io/send! (:some-queue @mocks/queues) {:payload 90}))
       (-> @mocks/queues :response :messages deref last :payload) => 92)))

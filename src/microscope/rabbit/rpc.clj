@@ -12,10 +12,10 @@
 (defrecord Queue [channel name cid original-meta]
   io/IO
   (listen [self function]
-          (let [callback (partial rabbit/callback-payload function 1 self)]
+          (let [callback #(rabbit/callback-payload function self %2 %3)]
             (consumers/subscribe channel name callback)))
 
-  (send! [_ {:keys [payload meta] :or {meta {}}}]
+  (send! [_ {:keys [payload _]}]
          (basic/publish channel "" (:reply-to original-meta)
                         (io/serialize-msg payload)
                         (select-keys original-meta [:correlation-id])))
@@ -35,7 +35,7 @@
 
 (defn- real-rabbit-queue [name opts]
   (let [opts (merge rabbit/default-queue-params opts)
-        [connection channel] (rabbit/connection-to-queue name (:prefetch-count opts))]
+        [_ channel] (rabbit/connection-to-queue name (:prefetch-count opts))]
     (rabbit/define-queue channel name opts)
     (->Queue channel name nil nil)))
 

@@ -67,12 +67,12 @@
 
     (fact "informs that channel is offline"
       (let [queue (q-generator {})]
-        (update-in @rabbit/connections [:localhost 1] core/close)
+        (-> @rabbit/connections :localhost second core/close)
         (health/check {:q queue})) => {:result false
                                        :details {:q {:channel "is closed"}}}
       (against-background
        (after :facts (do
-                       (update-in @rabbit/connections [:localhost 0] core/close)
+                       (-> @rabbit/connections :localhost first core/close)
                        (reset! rabbit/connections {})))))))
 
 (facts "Handling messages on RabbitMQ's queue"
@@ -119,10 +119,8 @@
         sub (components/subscribe-with :first-q first-q
                                        :second-q second-q
                                        :third-q third-q)]
-    (sub :second-q (fn [f-msg {:keys [second-q]}]
-                     (future/map #(deliver p1 (:payload %)) f-msg)))
-    (sub :third-q (fn [f-msg {:keys [second-q]}]
-                    (future/map #(deliver p2 (:payload %)) f-msg)))
+    (sub :second-q (fn [f-msg _] (future/map #(deliver p1 (:payload %)) f-msg)))
+    (sub :third-q (fn [f-msg _] (future/map #(deliver p2 (:payload %)) f-msg)))
 
     (io/send! (first-q {:cid "FOO"}) {:payload "some-msg"})
     (deref p1 500 :TIMEOUT) => "some-msg"
