@@ -1,3 +1,7 @@
+# 0.2.0
+* Removed deprecated `rabbit/queues`
+* Normalized logs to use our schema (meta and payload, as strings)
+
 # 0.1.5
 * Add message's queue name into log metadata
 * Remove "msg" root key from log metadata
