@@ -68,21 +68,29 @@
 ;           (reject-msg)
 ;           (callback {:payload payload :meta (parse-meta meta)}))))))
 ;
+(defn- callback-payload [callback msg]
+  (let [headers (-> msg .-headers js->clj)
+        fields (-> msg .-fields js->clj)
+        properties (-> msg .-properties js->clj)
+        payload (.-content msg)
+        meta (merge headers fields properties)
+        msg {:meta meta
+             :payload (-> payload .toString io/deserialize-msg)}]
+    (callback (with-meta msg {:original-msg msg}))))
+
 (defn- raise-error []
   (throw (js/Error.
           (str "Can't publish to queue without CID. Maybe you tried to send a message "
                "using `queue` from components' namespace. Prefer to use the "
                "components' attribute to create one."))))
 
+(defn p [a] (println a) a)
 (defrecord Queue [channel name max-retries cid]
   io/IO
   (listen [self function]
-          (let [callback (fn [msg]
-                           (println msg))]
+          (let [callback #(callback-payload function %)]
             (. channel then #(.consume % name callback))))
-          ; (let [callback #(callback-payload function self %2 %3)]
-          ;   (consumers/subscribe channel name callback))))
-;
+
   (send! [_ {:keys [payload meta] :or {meta {}}}]
          (when-not cid (raise-error))
          (let [payload (io/serialize-msg payload)
@@ -91,16 +99,18 @@
                               (. js/Buffer from payload)
                               (clj->js meta)))))
 
-  (ack! [_ {:keys [meta]}])
+  (ack! [_ msg]
+    (println "ACK")
+    (. channel (then #(->> msg meta p :original-msg p (.ack %)))))
 ;         (basic/ack channel (:delivery-tag meta)))
 ;
-  (log-message [_ logger {:keys [payload meta]}]))
+  (log-message [_ logger {:keys [payload meta]}])
 ;     (let [meta (assoc meta :queue name)]
 ;       (log/info logger "Processing message"
 ;                 :payload (io/serialize-msg payload)
 ;                 :meta (io/serialize-msg meta))))
 ;
-;   (reject! [self msg _]
+  (reject! [self msg _]))
 ;            (let [meta (:meta msg)
 ;                  meta (assoc meta :headers (normalize-headers meta))
 ;                  payload (-> msg :payload io/serialize-msg)]
@@ -117,10 +127,9 @@
                               :queues (some-> :rabbit-queues env/secret-or-env
                                               io/deserialize-msg)})
 
-(defn- connection-to-host [host prefetch-count resolve]
+(defn- connection-to-host [host prefetch-count]
   (let [connection (.connect amqp)
         channel (. connection then #(.createChannel %))]
-    (. channel then #(resolve %))
     (future/join [connection channel])))
   ; (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))])])
   ; (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))])]))
@@ -131,11 +140,11 @@
 ;       conn
 ;       (get (swap! connections assoc host (connect!)) host))))
 ;
-(defn connection-to-queue [queue-name prefetch-count resolve]
+(defn connection-to-queue [queue-name prefetch-count]
   (let [queue-host (get-in rabbit-config [:queues (keyword queue-name)])]
     (if queue-host
-      (connection-to-host (keyword queue-host) prefetch-count resolve)
-      (connection-to-host :localhost prefetch-count resolve))))
+      (connection-to-host (keyword queue-host) prefetch-count)
+      (connection-to-host :localhost prefetch-count))))
 ;
 ; (defn disconnect! []
 ;   (doseq [[_ [connection channel]] @connections]
@@ -173,14 +182,26 @@
 ;       (queue/bind channel queue-name exchange-name))))
 ;
 (defn- real-rabbit-queue [name opts]
-  (let [promise
+  (let [dead-letter-name (str name "-dlx")
+        dead-letter-q-name (str name "-deadletter")
+        queue-args (assoc opts :arguments {"x-dead-letter-exchange" dead-letter-name
+                                           "x-message-ttl" (:ttl opts)})
+        promise
         (js/Promise. (fn [resolve]
                        (let [opts (merge default-queue-params opts)]
-                         (-> (connection-to-queue name (:prefetch-count opts) resolve)
+                         (-> (connection-to-queue name (:prefetch-count opts))
                              (.then (fn [[_ channel]]
-                                      (. channel assertQueue name (clj->js opts))
-                                      (. channel assertExchange name) ;(clj->js opts))
-                                      (. channel bindQueue name name)))))))]
+                                      (-> (. channel assertQueue name (clj->js opts))
+                                          (.then #(. channel assertQueue
+                                                    dead-letter-q-name #js {:durable true}))
+                                          (.then #(. channel assertExchange
+                                                    name "direct")) ;(clj->js opts))
+                                          (.then #(. channel assertExchange
+                                                    dead-letter-name "fanout"
+                                                    #js {:durable true}))
+                                          (.then #(. channel bindQueue name name))
+                                          (.then #(. channel bindQueue name dead-letter-name))
+                                          (.then #(resolve channel)))))))))]
 
     ;
     ;     (define-queue channel name opts)

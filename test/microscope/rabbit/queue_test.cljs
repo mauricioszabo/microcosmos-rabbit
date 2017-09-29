@@ -19,6 +19,7 @@
 (defn- send-msg [fut-value {:keys [result-q]}]
   (future/map (fn [value]
                 (swap! all-msgs conj value)
+                (println "VALUA: " value)
                 (case (:payload value)
                   "error" (throw (js/Error. "Some Error"))
                   (io/send! result-q value)))
@@ -224,4 +225,5 @@
 ;       (-> @mocks/queues :test-result :messages deref)
 ;       => (just [(contains {:payload "MSG ONE"})]))))
 
-(run-tests)
+(comment
+ (run-tests))
