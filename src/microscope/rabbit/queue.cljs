@@ -1,11 +1,12 @@
 (ns microscope.rabbit.queue
   (:require [clojure.core :as clj]
             [microscope.io :as io]
-            ; [microscope.healthcheck :as health]
+            [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.logging :as log]
             ; [microscope.rabbit.mocks :as mocks]
-            [microscope.env :as env]))
+            [microscope.env :as env]
+            [clojure.walk :as walk]))
 
 (def ^:private amqp (js/require "amqplib"))
 ; (generators/add-encoder LongString generators/encode-str)
@@ -73,7 +74,7 @@
         fields (-> msg .-fields js->clj)
         properties (-> msg .-properties js->clj)
         payload (.-content msg)
-        meta (merge headers fields properties)
+        meta (walk/keywordize-keys (merge headers fields properties))
         message {:meta meta
                  :payload (-> payload .toString io/deserialize-msg)}]
     (callback (with-meta message {:original-msg msg}))))
@@ -84,42 +85,47 @@
                "using `queue` from components' namespace. Prefer to use the "
                "components' attribute to create one."))))
 
-(defn p [a] (println "DBG" a) a)
+(defn- normalize-meta [meta]
+  (cond-> meta
+          (not (:expiration meta)) (dissoc :expiration)
+          :all clj->js))
 (defrecord Queue [channel name max-retries cid]
   io/IO
   (listen [self function]
-          (let [callback #(callback-payload function %)]
-            (. channel then #(.consume % name callback))))
+    (let [callback #(callback-payload function %)]
+      (. channel then #(.consume % name callback))))
 
   (send! [_ {:keys [payload meta] :or {meta {}}}]
-         (when-not cid (raise-error))
-         (let [payload (io/serialize-msg payload)
-               meta (assoc meta :headers (clj->js (assoc meta :cid cid)))]
-           (. channel then #(. % publish name ""
-                              (. js/Buffer from payload)
-                              (clj->js meta)))))
+    (when-not cid (raise-error))
+    (let [payload (io/serialize-msg payload)
+          meta (assoc meta :headers (clj->js (assoc meta :cid cid)))]
+      (. channel then #(. % publish name ""
+                         (. js/Buffer from payload)
+                         (normalize-meta meta)))))
 
   (ack! [_ msg]
-    (println "ACK")
-    (. channel (then #(->> msg meta p :original-msg p (.ack %)))))
+    (. channel (then #(->> msg meta :original-msg (.ack %)))))
 ;         (basic/ack channel (:delivery-tag meta)))
 ;
-  (log-message [_ logger {:keys [payload meta]}])
-;     (let [meta (assoc meta :queue name)]
-;       (log/info logger "Processing message"
-;                 :payload (io/serialize-msg payload)
-;                 :meta (io/serialize-msg meta))))
-;
-  (reject! [self msg _]))
+  (reject! [self msg _])
 ;            (let [meta (:meta msg)
 ;                  meta (assoc meta :headers (normalize-headers meta))
 ;                  payload (-> msg :payload io/serialize-msg)]
 ;              (reject-or-requeue self meta payload)))
 ;
-;   health/Healthcheck
-;   (unhealthy? [_] (when (core/closed? channel)
-;                     {:channel "is closed"})))
-;
+  (log-message [_ logger {:keys [payload meta]}]
+    (let [meta (assoc meta :queue name)]
+      (log/info logger "Processing message"
+                :payload (io/serialize-msg payload)
+                :meta (io/serialize-msg meta))))
+
+  health/Healthcheck
+  (unhealthy? [_]
+    (-> channel
+        (.then #(. % checkQueue name))
+        (.then #(do nil))
+        (.catch #(do {:queue "doesn't exists or error on connection"})))))
+
 (defonce connections (atom {}))
 
 (def ^:private rabbit-config {:hosts (some-> :rabbit-config env/secret-or-env

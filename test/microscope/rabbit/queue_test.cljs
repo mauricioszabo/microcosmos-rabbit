@@ -7,32 +7,28 @@
             [microscope.rabbit.queue :as rabbit]
 ;             [microscope.rabbit.mocks :as mocks]
             [microscope.logging :as log]))
-;             [cheshire.core :as json]
-;             [langohr.core :as core]
-;             [midje.sweet :refer :all]))
 
-(defn clean-up! [f]
-  (f)
-  (js/setTimeout #(rabbit/disconnect!) 1000))
-(tst/use-fixtures :once clean-up!)
+(tst/use-fixtures :once
+  {
+;    :before #(async done
+;               (println "BEG")
+;               (done))
+   :after #(do
+             (println "WTF?")
+             (rabbit/disconnect!))})
 
 (def all-msgs (atom []))
 (def all-processed (atom []))
 (def all-deadletters (atom []))
-(def last-promise (atom nil))
+(def last-promise (atom {}))
 
-; (.then a #(println %))
 (defn- send-msg [fut-value {:keys [result-q]}]
-  (def a
-    (future/map (fn [value]
-                  (swap! all-msgs conj value)
-                  (println "VALUE: " value)
-                  (case (:payload value)
-                    "error" (throw (js/Error. "Some Error"))
-                    (io/send! result-q value))
-                  :FOO)
-                fut-value))
-  a)
+  (future/map (fn [value]
+                (swap! all-msgs conj value)
+                (case (:payload value)
+                  "error" (throw (js/Error. "Some Error"))
+                  (io/send! result-q value)))
+              fut-value))
 
 (def logger-msgs (atom nil))
 (defn logger-gen [{:keys [cid]}]
@@ -44,42 +40,22 @@
 (defn in-future [f]
   (fn [future _] (future/map f future)))
 
-; (defn send-messages [msgs]
-;   (let [test-queue (rabbit/queue "test" :auto-delete true :max-retries 1)
-;         result-queue (rabbit/queue "test-result" :auto-delete true)
-;         channel (:channel (result-queue {}))
-;         deadletter-queue (fn [_] (rabbit/->Queue channel "test-deadletter" 1000 "FOO"))
-;         sub (components/subscribe-with :result-q result-queue
-;                                        :logger logger-gen
-;                                        :test-queue test-queue
-;                                        :result-queue result-queue
-;                                        :deadletter-queue deadletter-queue)]
-;     (sub :test-queue send-msg)
-;     (sub :result-queue (in-future #(do
-;                                      (swap! all-processed conj %)
-;                                      (when (realized? @last-promise)
-;                                        (reset! last-promise (promise)))
-;                                      (deliver @last-promise %))))
-;     (sub :deadletter-queue (in-future #(swap! all-deadletters conj %)))
-;     (doseq [msg msgs]
-;       (io/send! (test-queue {:cid "FOO"}) msg))))
-;
-
-; (defn- realize-or-deliver [msg]
-;   (when (realized? @last-promise)
-;     (reset! last-promise (promise)))
-;   (deliver @last-promise %))
-
-; CLJS version
 (defn prepare-last-msg
-  ([])
-  ([msg] (reset! last-promise (future/just msg))))
+  ([]
+   (let [p (js/Promise. (fn [resolve]
+                          (swap! last-promise assoc :resolve resolve)))]
+     (swap! last-promise assoc :promise p)))
+  ([msg]
+   ((:resolve @last-promise) msg)))
 
-; CLJS version
 (defn wait-for-last-message [f]
-  (.then @last-promise) f)
+  (.then (:promise @last-promise) f))
 
-(defn send-and-wait [ & msgs]
+(defn send-messages [msgs]
+  ; Prepares promise/something to receive the last message. This will
+  ; be used to "wait"
+  (prepare-last-msg)
+
   (let [test-queue (rabbit/queue "test" :auto-delete true :max-retries 1)
         result-queue (rabbit/queue "test-result" :auto-delete true)
         channel (:channel (result-queue {}))
@@ -91,9 +67,6 @@
                                        :deadletter-queue deadletter-queue)]
 
 
-    ; Prepares promise/something to receive the last message. This will
-    ; be used to "wait"
-    (prepare-last-msg)
     ; Subscribe to the queue we'll send messages. This will deliver to
     ; deadletter if message is "error"
     (sub :test-queue send-msg)
@@ -107,49 +80,49 @@
     ; Send messages, at last!
     (doseq [msg msgs] (io/send! (test-queue {:cid "FOO"}) msg))))
 
-; (defn send-and-wait [ & msgs]
-;   (send-messages msgs)
-;   (deref @last-promise 1000 {:payload :timeout
-;                              :meta :timeout}))
-;
-; (defn prepare-tests []
-;   (reset! last-promise (promise))
-;   (reset! all-msgs [])
-;   (reset! all-processed [])
-;   (reset! all-deadletters []))
-;
-; (facts "Handling healthchecks"
-;   (let [q-generator (rabbit/queue "test" :auto-delete true)]
-;     (fact "health-checks if connections and channels are defined"
-;       (health/check {:q (q-generator {})}) => {:result true :details {:q nil}})
-;
-;     (fact "informs that channel is offline"
-;       (let [queue (q-generator {})]
-;         (-> @rabbit/connections :localhost second core/close)
-;         (health/check {:q queue})) => {:result false
-;                                        :details {:q {:channel "is closed"}}}
+(defn send-and-wait [ & msgs]
+  (def m msgs)
+  (let [fun (last msgs)
+        msgs (butlast msgs)]
+    (send-messages msgs)
+    (wait-for-last-message fun)))
+
+(deftest handling-healthchecks
+  (async done
+    (let [q-generator (rabbit/queue "test" :auto-delete true)]
+      (.then (health/check {:q (q-generator {})})
+             #(do
+                (is (= {:result true :details {:q nil}} %))
+                (done))))))
+
+      ; (fact "informs that channel is offline"
+      ;   (let [queue (q-generator {})]
+      ;     (-> @rabbit/connections :localhost second core/close)
+      ;     (health/check {:q queue})) => {:result false
+      ;                                    :details {:q {:channel "is closed"}}}))))
 ;       (against-background
 ;        (after :facts (do
 ;                        (-> @rabbit/connections :localhost first core/close)
 ;                        (reset! rabbit/connections {})))))))
 ;
-(deftest rabbitmq-queue-handling
-  (testing "handles message if successful"
-    (is (= {:some "msg"}
-           (:payload (send-and-wait {:payload {:some "msg"}}))))))
-;
-;   (facts "logs that we're processing a message"
-;     (send-and-wait {:payload {:some "msg"}})
-;     (first @logger-msgs) => (just {:message "Processing message"
-;                                    :type :info
-;                                    :cid ..cid..
-;                                    :payload "{\"some\":\"msg\"}"
-;                                    :meta #"\"queue\":\"test-result\""}))
-;
-;   (fact "attaches metadata into msg"
-;     (:meta (send-and-wait {:payload {:some "msg"}, :meta {:a 10}}))
-;     => (contains {:a 10, :cid "FOO.BAR"}))
-;
+(deftest handles-message-if-successful
+  (async done
+    (send-and-wait {:payload {:some "msg"}}
+                   #(do
+                      (is (= {:some "msg"}
+                             (:payload %)))
+                      (done)))))
+
+(deftest logs-that-we-re-processing-a-message
+  (async done
+    (send-and-wait {:payload {:some "msg"}}
+                   #(let [msg (first @logger-msgs)]
+                      (is (= "Processing message" (:message msg)))
+                      (is (= :info (:type msg)))
+                      (is (string? (:cid msg)))
+                      (is (= "{\"some\":\"msg\"}" (:payload msg)))
+                      (is (re-find #"\"queue\":\"test-result\"" (:meta msg)))))))
+
 ;   (fact "attaches CID between services"
 ;     (get-in (send-and-wait {:payload "msg"}) [:meta :cid]) => "FOO.BAR")
 ;
