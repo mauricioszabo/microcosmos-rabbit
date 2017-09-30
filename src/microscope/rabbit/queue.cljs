@@ -50,34 +50,45 @@
 ;                                          (let [map (into {} hash-map)]
 ;                                            (assoc map "retries"
 ;                                                   (-> meta retries-so-far inc)))))))
-;
-; (defn reject-or-requeue [queue meta payload]
-;   (let [retries (retries-so-far meta)
-;         send-to-deadletter #(basic/reject (:channel queue) (:delivery-tag meta) false)]
-;     (cond
-;       (>= retries (:max-retries queue)) (send-to-deadletter)
-;       :requeue-message (do
-;                          (requeue-msg queue payload meta)
-;                          (ack-msg queue meta)))))
-;
-; (defn callback-payload [callback self meta payload]
-;   (let [reject-msg #(basic/reject (:channel self) (:delivery-tag meta) false)]
-;     (if (:redelivery? meta)
-;       (reject-or-requeue self meta payload)
-;       (let [payload (try (parse-payload payload) (catch JsonParseException _ :INVALID))]
-;         (if (= payload :INVALID)
-;           (reject-msg)
-;           (callback {:payload payload :meta (parse-meta meta)}))))))
-;
-(defn- callback-payload [callback msg]
+(defn- normalize-meta [meta]
+  (cond-> meta
+          (not (:expiration meta)) (dissoc :expiration)
+          :all clj->js))
+
+(defn requeue-msg [queue original-msg meta]
+  (println (update-in meta [:headers :retries] inc))
+  (. (:channel queue) then #(. % publish "" (:name queue)
+                                 (.-content original-msg)
+                                 (normalize-meta (update-in meta [:headers :retries] inc)))))
+
+(defn reject-or-requeue [queue meta original-msg]
+  (println "Should reject?" meta)
+  (let [retries (get-in meta [:headers :retries] 0)
+        send-to-deadletter (delay (. (:channel queue) then
+                                    #(. % reject original-msg false)))
+
+        ack-msg (delay (. (:channel queue) then
+                         #(.ack % original-msg)))]
+    (println retries)
+    (cond
+      (>= retries (:max-retries queue)) @send-to-deadletter
+      :requeue-message (.then (requeue-msg queue original-msg meta)
+                              (fn [] @ack-msg)))))
+
+(defn- callback-payload [queue callback msg]
+  ; FIXME: Less inteligence here...
   (let [headers (-> msg .-headers js->clj)
         fields (-> msg .-fields js->clj)
         properties (-> msg .-properties js->clj)
-        payload (.-content msg)
-        meta (walk/keywordize-keys (merge headers fields properties))
-        message {:meta meta
-                 :payload (-> payload .toString io/deserialize-msg)}]
-    (callback (with-meta message {:original-msg msg}))))
+        meta (walk/keywordize-keys (merge headers fields properties))]
+    (if (-> msg .-fields .-redelivered)
+      (reject-or-requeue queue meta msg)
+      (let [message (delay {:meta meta
+                            :payload (-> msg .-content .toString io/deserialize-msg)})
+            message (try @message (catch :default e nil))]
+        (if message
+          (callback (with-meta message {:original-msg msg}))
+          (reject-or-requeue queue meta msg))))))
 
 (defn- raise-error []
   (throw (js/Error.
@@ -85,14 +96,10 @@
                "using `queue` from components' namespace. Prefer to use the "
                "components' attribute to create one."))))
 
-(defn- normalize-meta [meta]
-  (cond-> meta
-          (not (:expiration meta)) (dissoc :expiration)
-          :all clj->js))
 (defrecord Queue [channel name max-retries cid]
   io/IO
   (listen [self function]
-    (let [callback #(callback-payload function %)]
+    (let [callback #(callback-payload self function %)]
       (. channel then #(.consume % name callback))))
 
   (send! [_ {:keys [payload meta] :or {meta {}}}]
@@ -105,14 +112,12 @@
 
   (ack! [_ msg]
     (. channel (then #(->> msg meta :original-msg (.ack %)))))
-;         (basic/ack channel (:delivery-tag meta)))
-;
-  (reject! [self msg _])
-;            (let [meta (:meta msg)
-;                  meta (assoc meta :headers (normalize-headers meta))
-;                  payload (-> msg :payload io/serialize-msg)]
-;              (reject-or-requeue self meta payload)))
-;
+
+  (reject! [self msg _]
+    (let [original-msg (->> msg meta :original-msg)
+          {:keys [meta]} msg]
+      (reject-or-requeue self meta original-msg)))
+
   (log-message [_ logger {:keys [payload meta]}]
     (let [meta (assoc meta :queue name)]
       (log/info logger "Processing message"
