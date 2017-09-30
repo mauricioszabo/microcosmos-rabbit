@@ -74,9 +74,9 @@
         properties (-> msg .-properties js->clj)
         payload (.-content msg)
         meta (merge headers fields properties)
-        msg {:meta meta
-             :payload (-> payload .toString io/deserialize-msg)}]
-    (callback (with-meta msg {:original-msg msg}))))
+        message {:meta meta
+                 :payload (-> payload .toString io/deserialize-msg)}]
+    (callback (with-meta message {:original-msg msg}))))
 
 (defn- raise-error []
   (throw (js/Error.
@@ -84,7 +84,7 @@
                "using `queue` from components' namespace. Prefer to use the "
                "components' attribute to create one."))))
 
-(defn p [a] (println a) a)
+(defn p [a] (println "DBG" a) a)
 (defrecord Queue [channel name max-retries cid]
   io/IO
   (listen [self function]
@@ -120,40 +120,39 @@
 ;   (unhealthy? [_] (when (core/closed? channel)
 ;                     {:channel "is closed"})))
 ;
-; (defonce connections (atom {}))
-;
+(defonce connections (atom {}))
+
 (def ^:private rabbit-config {:hosts (some-> :rabbit-config env/secret-or-env
                                              io/deserialize-msg)
                               :queues (some-> :rabbit-queues env/secret-or-env
                                               io/deserialize-msg)})
 
 (defn- connection-to-host [host prefetch-count]
-  (let [connection (.connect amqp)
-        channel (. connection then #(.createChannel %))]
-    (future/join [connection channel])))
+  (let [connection (delay (.connect amqp))
+        channel (delay (. @connection then #(.createChannel %)))]
+
   ; (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))])])
   ; (let [connect! #(let [connection (core/connect (get-in rabbit-config [:hosts host] {}))])]))
 ;                         channel (doto (channel/open connection)
 ;                                       (basic/qos prefetch-count))]
 ;                     [connection channel])]
-;     (if-let [conn (get @connections host)]
-;       conn
-;       (get (swap! connections assoc host (connect!)) host))))
+    (if-let [conn (get @connections host)]
+      conn
+      (get (swap! connections assoc host (future/join [@connection @channel])) host))))
 ;
 (defn connection-to-queue [queue-name prefetch-count]
   (let [queue-host (get-in rabbit-config [:queues (keyword queue-name)])]
     (if queue-host
       (connection-to-host (keyword queue-host) prefetch-count)
       (connection-to-host :localhost prefetch-count))))
-;
-; (defn disconnect! []
-;   (doseq [[_ [connection channel]] @connections]
-;     (try
-;       (core/close channel)
-;       (core/close connection)
-;       (catch com.rabbitmq.client.AlreadyClosedException _)))
-;   (reset! connections {}))
-;
+
+(defn disconnect! []
+  (doseq [[_ promise] @connections]
+    (. promise then (fn [[connection channel]]
+                      (.close channel)
+                      (.close connection))))
+  (reset! connections {}))
+
 (def ^:private os (js/require "os"))
 (def default-queue-params {:exclusive false
                            :auto-ack false

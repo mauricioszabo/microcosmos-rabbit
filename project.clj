@@ -10,7 +10,7 @@
 
   :profiles {:dev {:src-paths ["dev"]
                    :dependencies [[midje "1.8.3"]
-                                  [figwheel-sidecar "0.5.9"]
+                                  [figwheel-sidecar "0.5.13"]
                                   [com.cemerick/piggieback "0.2.1"]]
                    :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
                    :plugins [[lein-midje "3.2.1"]]}}

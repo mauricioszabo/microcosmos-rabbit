@@ -1,8 +1,8 @@
 (ns microscope.rabbit.queue-test
-  (:require [clojure.test :refer-macros [deftest is testing run-tests async]]
+  (:require [clojure.test :refer-macros [deftest is testing run-tests async] :as tst]
             [microscope.core :as components]
             [microscope.io :as io]
-;             [microscope.healthcheck :as health]
+            [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.rabbit.queue :as rabbit]
 ;             [microscope.rabbit.mocks :as mocks]
@@ -11,19 +11,28 @@
 ;             [langohr.core :as core]
 ;             [midje.sweet :refer :all]))
 
+(defn clean-up! [f]
+  (f)
+  (js/setTimeout #(rabbit/disconnect!) 1000))
+(tst/use-fixtures :once clean-up!)
+
 (def all-msgs (atom []))
 (def all-processed (atom []))
 (def all-deadletters (atom []))
 (def last-promise (atom nil))
 
+; (.then a #(println %))
 (defn- send-msg [fut-value {:keys [result-q]}]
-  (future/map (fn [value]
-                (swap! all-msgs conj value)
-                (println "VALUA: " value)
-                (case (:payload value)
-                  "error" (throw (js/Error. "Some Error"))
-                  (io/send! result-q value)))
-              fut-value))
+  (def a
+    (future/map (fn [value]
+                  (swap! all-msgs conj value)
+                  (println "VALUE: " value)
+                  (case (:payload value)
+                    "error" (throw (js/Error. "Some Error"))
+                    (io/send! result-q value))
+                  :FOO)
+                fut-value))
+  a)
 
 (def logger-msgs (atom nil))
 (defn logger-gen [{:keys [cid]}]
@@ -225,5 +234,4 @@
 ;       (-> @mocks/queues :test-result :messages deref)
 ;       => (just [(contains {:payload "MSG ONE"})]))))
 
-(comment
- (run-tests))
+(run-tests)
