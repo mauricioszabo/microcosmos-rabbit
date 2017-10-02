@@ -1,6 +1,5 @@
 (ns microscope.rabbit.queue
-  (:require [clojure.core :as clj]
-            [microscope.io :as io]
+  (:require [microscope.io :as io]
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.logging :as log]
