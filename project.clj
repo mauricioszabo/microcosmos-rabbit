@@ -15,6 +15,8 @@
                    :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}
                    :plugins [[lein-midje "3.2.1"]]}}
 
+  :plugins [[lein-cljsbuild "1.1.7"]]
+
   :cljsbuild {:builds [{:source-paths ["src"]
                         :id "prod"
                         :compiler {:output-to "target/main.js"
