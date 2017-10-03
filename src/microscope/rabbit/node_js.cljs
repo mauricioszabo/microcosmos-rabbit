@@ -50,9 +50,4 @@
 
 (aset js/module "exports"
       #js {:subscribeWith subscribe-with
-           :rabbit #js {:queue (js->clj->js rabbit/queue)}
-           :str str
-           :io io/IO
-           :Queue rabbit/Queue
-           :to_js clj->js
-           :to_clj js->clj})
+           :rabbit #js {:queue (js->clj->js rabbit/queue)}})
