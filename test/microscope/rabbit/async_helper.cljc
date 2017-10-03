@@ -20,13 +20,21 @@
 ;    (println "WOW")
 ;    (close! c)))
 
-(defmacro def-async-test [description & cmds]
+(defmacro def-async-test [description opts & cmds]
+  (assert (map? opts) "second parameter must be a map")
   (let [norm-desc (symbol (str/replace description #"[^\w\d]" ""))]
     `(deftest ~norm-desc
        (cljs.test/async done#
          (cljs.core.async.macros/go
-          (let [mark-as-done# (delay (done#))]
+          (let [mark-as-done# (delay
+                               ~(if-let [teardown (:teardown opts)]
+                                  teardown)
+                               (done#))]
             (testing ~description
-              (js/setTimeout (fn [] @mark-as-done#) 3000)
+              (js/setTimeout (fn []
+                               (when-not (realized? mark-as-done#)
+                                 (cljs.test/is (throw "Async test error - not finalized"))
+                                 @mark-as-done#))
+                             3000)
               ~@cmds
               @mark-as-done#)))))))
