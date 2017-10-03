@@ -1,6 +1,10 @@
 {
+  "name":"Microscope.JS",
+  "version":"0.0.1",
   "dependencies": {
-    "amqplib": "^0.5.1",
+    "amqplib": "^0.5.1"
+  },
+  "devDependencies": {
     "ws": "^3.2.0"
   }
 }
