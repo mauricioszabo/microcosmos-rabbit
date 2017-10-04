@@ -22,6 +22,7 @@
                         :compiler {:output-to "target/main.js"
                                    :optimizations :simple
                                    :hashbang false
+                                   :language-in :es5
                                    :output-wrapper true
                                    :pretty-print true
                                    :target :nodejs}}
