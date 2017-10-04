@@ -2,7 +2,7 @@
     (ns microscope.rabbit.async-helper
       (:require-macros [cljs.core.async.macros])
                       ;  [expectations :refer [expect]])
-      (:require [cljs.core.async :refer [close! chan >! <!]]
+      (:require [cljs.core.async :refer [close! chan >! <! alts!]]
                 [clojure.test :refer-macros [deftest async testing]]
                 ; [cljs.core.async.macros :include-macros true]
                 [clojure.string :as str]))
@@ -13,11 +13,12 @@
                 [clojure.string :as str])))
 
 (defmacro await! [chan] `(cljs.core.async/<! ~chan))
+(defmacro await-all! [chans] `(cljs.core.async/alts! ~chans))
 
 (defmacro def-async-test [description opts & cmds]
   (assert (map? opts) "second parameter must be a map")
   (let [norm-desc (symbol (-> description
-                              (str/replace #"\s" "-") 
+                              (str/replace #"\s" "-")
                               (str/replace #"[^\-\w\d]" "")))]
     `(deftest ~norm-desc
        (cljs.test/async done#

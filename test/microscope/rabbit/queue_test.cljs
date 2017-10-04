@@ -6,8 +6,8 @@
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.rabbit.queue :as rabbit]
-            [cljs.core.async :refer [close! chan >! <!]]
-            [microscope.rabbit.async-helper :refer-macros [def-async-test await!]]
+            [cljs.core.async :refer [chan >! timeout]]
+            [microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]
 ;             [microscope.rabbit.mocks :as mocks]
             [microscope.logging :as log]
             [microscope.rabbit.async-helper :as helper]))
@@ -138,12 +138,13 @@
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
     (send! {:payload "fatal"})
-    (is (= "fatal" (await! all-messages))))
+    (is (= "fatal" (first (await-all! [all-messages (timeout 100)])))))
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
-    (is (= "fatal" (await! all-messages))))
+    (is (= "fatal" (first (await-all! [all-messages (timeout 100)])))))
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
+    (is (nil? (first (await-all! [all-messages (timeout 100)]))))
     (is (= "\"fatal\"" (await! deadletter)))))
 
 (run-tests)
