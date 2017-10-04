@@ -45,6 +45,7 @@
                                  (go (>! all-msgs-chan (:payload value)))
                                  (case (:payload value)
                                    "error" (throw (js/Error. "Some Error"))
+                                   "fatal" (rabbit/disconnect!)
                                    (io/send! result-q value)))
                                msg))
         results-chan (chan)
@@ -131,5 +132,18 @@
   (let [{:keys [queue deadletter]} (subscribe-all!)]
     (raw-send! queue "some-strange-msg")
     (is (= "some-strange-msg" (await! deadletter)))))
+
+(def-async-test "don't process message if old server died (but mark to retry later)"
+  {:teardown (rabbit/disconnect!)}
+
+  (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
+    (send! {:payload "fatal"})
+    (is (= "fatal" (await! all-messages))))
+
+  (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
+    (is (= "fatal" (await! all-messages))))
+
+  (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
+    (is (= "\"fatal\"" (await! deadletter)))))
 
 (run-tests)
