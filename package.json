@@ -1,6 +1,13 @@
 {
+  "name":"microscope.js",
+  "version":"0.0.1",
+  "license":"MIT",
+  "main": "target/main.js",
+  "files": ["target/main.js"],
   "dependencies": {
-    "amqplib": "^0.5.1",
+    "amqplib": "^0.5.1"
+  },
+  "devDependencies": {
     "ws": "^3.2.0"
   }
 }

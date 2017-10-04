@@ -55,20 +55,20 @@
           :all clj->js))
 
 (defn requeue-msg [queue original-msg meta]
-  (println (update-in meta [:headers :retries] inc))
   (. (:channel queue) then #(. % publish "" (:name queue)
                                  (.-content original-msg)
                                  (normalize-meta (update-in meta [:headers :retries] inc)))))
 
+(defn reject-msg [channel original-msg]
+  (. channel then #(. % reject original-msg false)))
+
 (defn reject-or-requeue [queue meta original-msg]
-  (println "Should reject?" meta)
   (let [retries (get-in meta [:headers :retries] 0)
         send-to-deadletter (delay (. (:channel queue) then
                                     #(. % reject original-msg false)))
-
         ack-msg (delay (. (:channel queue) then
                          #(.ack % original-msg)))]
-    (println retries)
+
     (cond
       (>= retries (:max-retries queue)) @send-to-deadletter
       :requeue-message (.then (requeue-msg queue original-msg meta)
@@ -193,34 +193,27 @@
 (defn- real-rabbit-queue [name opts]
   (let [dead-letter-name (str name "-dlx")
         dead-letter-q-name (str name "-deadletter")
+        opts (merge default-queue-params opts)
         queue-args (assoc opts :arguments {"x-dead-letter-exchange" dead-letter-name
                                            "x-message-ttl" (:ttl opts)})
         promise
         (js/Promise. (fn [resolve]
-                       (let [opts (merge default-queue-params opts)]
-                         (-> (connection-to-queue name (:prefetch-count opts))
-                             (.then (fn [[_ channel]]
-                                      (-> (. channel assertQueue name (clj->js opts))
-                                          (.then #(. channel assertQueue
-                                                    dead-letter-q-name #js {:durable true}))
-                                          (.then #(. channel assertExchange
-                                                    name "direct")) ;(clj->js opts))
-                                          (.then #(. channel assertExchange
-                                                    dead-letter-name "fanout"
-                                                    #js {:durable true}))
-                                          (.then #(. channel bindQueue name name))
-                                          (.then #(. channel bindQueue name dead-letter-name))
-                                          (.then #(resolve channel)))))))))]
+                       (-> (connection-to-queue name (:prefetch-count opts))
+                           (.then (fn [[_ channel]]
+                                    (-> (. channel assertQueue name (clj->js queue-args))
+                                        (.then #(. channel assertQueue
+                                                  dead-letter-q-name #js {:durable true}))
+                                        (.then #(. channel assertExchange
+                                                  name "direct")) ;(clj->js opts))
+                                        (.then #(. channel assertExchange
+                                                  dead-letter-name "fanout"
+                                                  #js {:durable true}))
+                                        (.then #(. channel bindQueue
+                                                  name name))
+                                        (.then #(. channel bindQueue
+                                                  dead-letter-q-name dead-letter-name))
+                                        (.then #(resolve channel))))))))]
 
-    ;
-    ;     (define-queue channel name opts)
-    ;
-    ;     (if (:delayed opts)
-    ;       (exchange/declare channel name "x-delayed-message"
-    ;                         {:arguments {"x-delayed-type" "direct"}})
-    ;       (exchange/declare channel name "fanout"))
-    ;
-    ;     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue promise name (:max-retries opts) nil)))
 ;
 (defn queue
