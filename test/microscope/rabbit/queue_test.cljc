@@ -1,16 +1,30 @@
-(ns microscope.rabbit.queue-test
-  (:require-macros [cljs.core.async.macros :refer [go]])
-  (:require [clojure.test :refer-macros [deftest is testing run-tests async] :as tst]
-            [microscope.core :as components]
-            [microscope.io :as io]
-            [microscope.healthcheck :as health]
-            [microscope.future :as future]
-            [microscope.rabbit.queue :as rabbit]
-            [cljs.core.async :refer [chan >! timeout]]
-            [microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]
-;             [microscope.rabbit.mocks :as mocks]
-            [microscope.logging :as log]
-            [microscope.rabbit.async-helper :as helper]))
+#?(:clj
+   (ns microscope.rabbit.queue-test
+     (:require [clojure.test :refer [is run-tests]]
+               [microscope.core :as components]
+               [microscope.io :as io]
+               [microscope.healthcheck :as health]
+               [microscope.future :as future]
+               [microscope.rabbit.queue :as rabbit]
+               [clojure.core.async :refer [chan >! timeout go]]
+               [microscope.rabbit.async-helper :refer [def-async-test await! await-all!]]
+               ;             [microscope.rabbit.mocks :as mocks]
+               [microscope.logging :as log]
+               [microscope.rabbit.async-helper :as helper]))
+   :cljs
+   (ns microscope.rabbit.queue-test
+     (:require-macros [cljs.core.async.macros :refer [go]])
+     (:require [clojure.test :refer-macros [deftest is testing run-tests async] :as tst]
+               [microscope.core :as components]
+               [microscope.io :as io]
+               [microscope.healthcheck :as health]
+               [microscope.future :as future]
+               [microscope.rabbit.queue :as rabbit]
+               [cljs.core.async :refer [chan >! timeout]]
+               [microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]
+               ;             [microscope.rabbit.mocks :as mocks]
+               [microscope.logging :as log]
+               [microscope.rabbit.async-helper :as helper])))
 
 
 (defn raw-consume [channel name callback]
@@ -44,7 +58,7 @@
                    (future/map (fn [value]
                                  (go (>! all-msgs-chan (:payload value)))
                                  (case (:payload value)
-                                   "error" (throw (js/Error. "Some Error"))
+                                   "error" (throw (ex-info "Some Error" {}))
                                    "fatal" (rabbit/disconnect!)
                                    (io/send! result-q value)))
                                msg))
@@ -63,22 +77,22 @@
      :all-messages all-msgs-chan
      :logger logger-chan}))
 
-(def-async-test "Handling healthchecks" {:teardown (rabbit/disconnect!)}
-  (let [health (chan)
-        q-generator (rabbit/queue "test" :auto-delete true)
-        queue (q-generator {})]
-
-    (testing "health-checks if connections and channels are defined"
-      (.then (health/check {:q queue}) #(go (>! health %)))
-      (is (= {:result true :details {:q nil}}
-             (await! health))))
-
-    (testing "informs that channel is offline"
-      (-> @rabbit/connections :localhost (.then #(-> % second .close)))
-      (.then (health/check {:q queue}) #(go (>! health %)))
-      (is (= {:result false :details {:q {:queue "doesn't exist or error on connection"}}}
-             (await! health))))))
-
+; (def-async-test "Handling healthchecks" {:teardown (rabbit/disconnect!)}
+;   (let [health (chan)
+;         q-generator (rabbit/queue "test" :auto-delete true)
+;         queue (q-generator {})]
+;
+;     (testing "health-checks if connections and channels are defined"
+;       (.then (health/check {:q queue}) #(go (>! health %)))
+;       (is (= {:result true :details {:q nil}}
+;              (await! health))))
+;
+;     (testing "informs that channel is offline"
+;       (-> @rabbit/connections :localhost (.then #(-> % second .close)))
+;       (.then (health/check {:q queue}) #(go (>! health %)))
+;       (is (= {:result false :details {:q {:queue "doesn't exist or error on connection"}}}
+;              (await! health))))))
+;
 (def-async-test "Sending a message to a queue" {:teardown (rabbit/disconnect!)}
   (let [{:keys [send! results]} (subscribe-all!)]
     (send! {:payload {:some "msg"}})
@@ -122,9 +136,12 @@
       (is (= "error" (await! all-messages)))
       (is (= "\"error\"" (await! deadletter))))))
 
-(defn raw-send! [queue msg]
-  (. (:channel queue) then
-    #(. % publish (:name queue) "" (. js/Buffer from msg))))
+#?(:clj
+   (defn raw-send! [queue msg])
+   :cljs
+   (defn raw-send! [queue msg]
+     (. (:channel queue) then
+       #(. % publish (:name queue) "" (. js/Buffer from msg)))))
 
 (def-async-test "sends message to deadletter if isn't in JSON format"
   {:teardown (rabbit/disconnect!)}
@@ -138,13 +155,13 @@
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
     (send! {:payload "fatal"})
-    (is (= "fatal" (first (await-all! [all-messages (timeout 100)])))))
+    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)])))))
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
-    (is (= "fatal" (first (await-all! [all-messages (timeout 100)])))))
+    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)])))))
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
-    (is (nil? (first (await-all! [all-messages (timeout 100)]))))
+    (is (nil? (first (await-all! [all-messages (timeout 1000)]))))
     (is (= "\"fatal\"" (await! deadletter)))))
 
 (run-tests)
