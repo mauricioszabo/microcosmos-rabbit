@@ -27,7 +27,6 @@
         real-test-q (test-queue {:cid "FOO"})
         result-queue (rabbit/queue "test-result" :auto-delete true)
         channel (:channel (result-queue {}))
-        deadletter-queue (fn [_] (rabbit/->Queue channel "test-deadletter" 1000 "FOO"))
         logger-chan (chan)
         all-msgs-chan (chan)
         logger-gen (fn [{:keys [cid]}]
@@ -40,8 +39,7 @@
         sub (components/subscribe-with :result-q result-queue
                                        :logger logger-gen
                                        :test-queue test-queue
-                                       :result-queue result-queue
-                                       :deadletter-queue deadletter-queue)
+                                       :result-queue result-queue)
         send-msg (fn [msg {:keys [result-q]}]
                    (future/map (fn [value]
                                  (go (>! all-msgs-chan (:payload value)))
