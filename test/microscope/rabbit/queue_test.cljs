@@ -13,11 +13,18 @@
             [microscope.rabbit.async-helper :as helper]))
 
 
+(defn raw-consume [channel name callback]
+  (. channel then (fn [c]
+                    (.consume c name (fn [msg]
+                                       (.ack c msg)
+                                       (callback (-> msg .-content .toString)))))))
+
 (defn in-future [f]
   (fn [future _] (future/map f future)))
 
 (defn subscribe-all! []
   (let [test-queue (rabbit/queue "test" :auto-delete true :max-retries 1)
+        real-test-q (test-queue {:cid "FOO"})
         result-queue (rabbit/queue "test-result" :auto-delete true)
         channel (:channel (result-queue {}))
         deadletter-queue (fn [_] (rabbit/->Queue channel "test-deadletter" 1000 "FOO"))
@@ -37,25 +44,24 @@
                                        :deadletter-queue deadletter-queue)
         send-msg (fn [msg {:keys [result-q]}]
                    (future/map (fn [value]
-                                 (go (>! all-msgs-chan [:msg (:payload value)]))
+                                 (go (>! all-msgs-chan (:payload value)))
                                  (case (:payload value)
                                    "error" (throw (js/Error. "Some Error"))
                                    (io/send! result-q value)))
                                msg))
-        msgs-chan (chan)
-        deadletter-chan (chan)]
+        results-chan (chan)
+        dead-chan (chan)]
 
     (sub :test-queue send-msg)
-    (sub :result-queue (in-future #(do
-                                     (go (>! all-msgs-chan [:alive (:payload %)]))
-                                     (go (>! msgs-chan %)))))
-    (sub :deadletter-queue (in-future #(do
-                                         (go (>! all-msgs-chan [:dead (:payload %)]))
-                                         (go (>! deadletter-chan %)))))
+    (sub :result-queue (in-future #(go (>! results-chan %))))
+    (raw-consume (:channel real-test-q) "test-deadletter"
+                 #(go (>! dead-chan %)))
+
     {:send! (fn [ & msgs] (doseq [m msgs] (io/send! (test-queue {:cid "FOO"}) m)))
-     :messages msgs-chan
+     :queue real-test-q
+     :results results-chan
+     :deadletter dead-chan
      :all-messages all-msgs-chan
-     :deadletter deadletter-chan
      :logger logger-chan}))
 
 (def-async-test "Handling healthchecks" {:teardown (rabbit/disconnect!)}
@@ -75,16 +81,16 @@
              (await! health))))))
 
 (def-async-test "Sending a message to a queue" {:teardown (rabbit/disconnect!)}
-  (let [{:keys [send! messages]} (subscribe-all!)]
+  (let [{:keys [send! results]} (subscribe-all!)]
     (send! {:payload {:some "msg"}})
     (is (= {:some "msg"}
-           (:payload (await! messages))))))
+           (:payload (await! results))))))
 
 (def-async-test "logs that we're processing a message" {:teardown (rabbit/disconnect!)}
-  (let [{:keys [send! logger messages]} (subscribe-all!)
+  (let [{:keys [send! logger results]} (subscribe-all!)
         _ (send! {:payload {:some "msg"}})
         {:keys [message cid type payload meta]} (await! logger)]
-    (is (map? (await! messages)))
+    (is (map? (await! results)))
     (is (= "Processing message" message))
     (is (= :info type))
     (is (re-matches #"FOO\.[\w\d]+" cid))
@@ -109,12 +115,23 @@
   {:teardown (rabbit/disconnect!)}
 
   (testing "acks the original msg, and generates other to retry things"
-    (let [{:keys [send! all-messages]} (subscribe-all!)]
+    (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
       (send! {:payload "error"} {:payload "msg"})
-      (is (= [:msg "error"] (await! all-messages)))
-      (is (= [:msg "msg"] (await! all-messages)))
-      (is (= [:alive "msg"] (await! all-messages)))
-      (is (= [:msg "error"] (await! all-messages)))
-      (is (= [:dead "error"] (await! all-messages))))))
+      (is (= "error" (await! all-messages)))
+      (is (= "msg" (await! all-messages)))
+      (is (map? (await! results)))
+      (is (= "error" (await! all-messages)))
+      (is (= "\"error\"" (await! deadletter))))))
+
+(defn raw-send! [queue msg]
+  (. (:channel queue) then
+    #(. % publish (:name queue) "" (. js/Buffer from msg))))
+
+(def-async-test "sends message to deadletter if isn't in JSON format"
+  {:teardown (rabbit/disconnect!)}
+
+  (let [{:keys [queue deadletter]} (subscribe-all!)]
+    (raw-send! queue "some-strange-msg")
+    (is (= "some-strange-msg" (await! deadletter)))))
 
 (run-tests)
