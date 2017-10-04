@@ -76,9 +76,9 @@
 
 (defn- callback-payload [queue callback msg]
   ; FIXME: Less inteligence here...
-  (let [headers (-> msg .-headers js->clj)
+  (let [headers (-> msg .-properties .-headers js->clj)
         fields (-> msg .-fields js->clj)
-        properties (-> msg .-properties js->clj)
+        properties (-> msg .-properties js->clj (dissoc :headers))
         meta (walk/keywordize-keys (merge headers fields properties))]
     (if (-> msg .-fields .-redelivered)
       (reject-or-requeue queue meta msg)
@@ -128,7 +128,7 @@
     (-> channel
         (.then #(. % checkQueue name))
         (.then #(do nil))
-        (.catch #(do {:queue "doesn't exists or error on connection"})))))
+        (.catch #(do {:queue "doesn't exist or error on connection"})))))
 
 (defonce connections (atom {}))
 

@@ -7,7 +7,7 @@
             [microscope.future :as future]
             [microscope.rabbit.queue :as rabbit]
             [cljs.core.async :refer [close! chan >! <!]]
-            [microscope.rabbit.async-helper :refer-macros [def-async-test]]
+            [microscope.rabbit.async-helper :refer-macros [def-async-test await!]]
 ;             [microscope.rabbit.mocks :as mocks]
             [microscope.logging :as log]
             [microscope.rabbit.async-helper :as helper]))
@@ -222,14 +222,19 @@
 ;     (done)
 ;     (done)))
 
-(def-async-test "Something that never happens" {}
-  (is (= 1 1)))
-
 (defn subscribe-all! []
   (let [test-queue (rabbit/queue "test" :auto-delete true :max-retries 1)
         result-queue (rabbit/queue "test-result" :auto-delete true)
         channel (:channel (result-queue {}))
         deadletter-queue (fn [_] (rabbit/->Queue channel "test-deadletter" 1000 "FOO"))
+        logger-chan (chan)
+        logger-gen (fn [{:keys [cid]}]
+                     (reify log/Log
+                       (log [_ msg type data]
+                         (go (>! logger-chan (assoc data
+                                                    :message msg
+                                                    :type type
+                                                    :cid cid))))))
         sub (components/subscribe-with :result-q result-queue
                                        :logger logger-gen
                                        :test-queue test-queue
@@ -237,7 +242,6 @@
                                        :deadletter-queue deadletter-queue)
         send-msg (fn [msg {:keys [result-q]}]
                    (future/map (fn [value]
-                                 (println "SENDING" value)
                                  (case (:payload msg)
                                    "error" (throw (js/Error. "Some Error"))
                                    (io/send! result-q value)))
@@ -250,13 +254,41 @@
     (sub :deadletter-queue (in-future #(go (>! deadletter-chan %))))
     {:send! #(io/send! (test-queue {:cid "FOO"}) %)
      :messages msgs-chan
-     :deadletter deadletter-chan}))
+     :deadletter deadletter-chan
+     :logger logger-chan}))
+
+(def-async-test "Handling healthchecks" {:teardown (rabbit/disconnect!)}
+  (let [health (chan)
+        q-generator (rabbit/queue "test" :auto-delete true)
+        queue (q-generator {})]
+
+    (testing "health-checks if connections and channels are defined"
+      (.then (health/check {:q queue}) #(go (>! health %)))
+      (is (= {:result true :details {:q nil}}
+             (await! health))))
+
+    (testing "informs that channel is offline"
+      (-> @rabbit/connections :localhost (.then #(-> % second .close)))
+      (.then (health/check {:q queue}) #(go (>! health %)))
+      (is (= {:result false :details {:q {:queue "doesn't exist or error on connection"}}}
+             (await! health))))))
 
 (def-async-test "Sending a message to a queue" {:teardown (rabbit/disconnect!)}
   (let [{:keys [send! messages]} (subscribe-all!)]
     (send! {:payload {:some "msg"}})
     (is (= {:some "msg"}
-           (:payload (<! messages))))))
+           (:payload (await! messages))))))
+
+(def-async-test "logs that we're processing a message" {:teardown (rabbit/disconnect!)}
+  (let [{:keys [send! logger]} (subscribe-all!)
+        _ (send! {:payload {:some "msg"}})
+        logger-msg (await! logger)]
+    (is (= "Processing message" (:message logger-msg)))
+    (is (= :info (:type logger-msg)))
+    (is (re-matches #"FOO\.[\w\d]+" (:cid logger-msg)))
+    (is (= "{\"some\":\"msg\"}" (:payload logger-msg)))
+    (is (re-find #"\"queue\":\"test\"" (:meta logger-msg)))))
+
 
 ;     (send-and-wait {:payload {:some "msg"}}
 ;                    #(do

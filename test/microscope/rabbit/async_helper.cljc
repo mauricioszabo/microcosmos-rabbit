@@ -12,17 +12,13 @@
                 [clojure.test :refer [deftest testing]]
                 [clojure.string :as str])))
 
-; (expect 1 20)
-; (go
-;  (let [c (chan 10)]
-;    (>! c "hello")
-;    (assert (= "hello" (<! c)))
-;    (println "WOW")
-;    (close! c)))
+(defmacro await! [chan] `(cljs.core.async/<! ~chan))
 
 (defmacro def-async-test [description opts & cmds]
   (assert (map? opts) "second parameter must be a map")
-  (let [norm-desc (symbol (str/replace description #"[^\w\d]" ""))]
+  (let [norm-desc (symbol (-> description
+                              (str/replace #"\s" "-") 
+                              (str/replace #"[^\-\w\d]" "")))]
     `(deftest ~norm-desc
        (cljs.test/async done#
          (cljs.core.async.macros/go
