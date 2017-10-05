@@ -1,57 +1,61 @@
+(ns microscope.rabbit.queue-test
+  (:require [microscope.core :as components]
+            [microscope.io :as io]
+            [microscope.healthcheck :as health]
+            [microscope.future :as future]
+            [microscope.rabbit.queue :as rabbit]
+            [microscope.rabbit.mocks :as mocks]
+            [microscope.logging :as log]
+            [microscope.rabbit.async-helper :as helper]))
+
+#?(:cljs (require-macros '[cljs.core.async.macros :refer [go]]))
+
 #?(:clj
-   (ns microscope.rabbit.queue-test
-     (:require [clojure.test :refer [is run-tests]]
-               [microscope.core :as components]
-               [microscope.io :as io]
-               [microscope.healthcheck :as health]
-               [microscope.future :as future]
-               [microscope.rabbit.queue :as rabbit]
-               [clojure.core.async :refer [chan >! timeout go]]
-               [microscope.rabbit.async-helper :refer [def-async-test await! await-all!]]
-               ;             [microscope.rabbit.mocks :as mocks]
-               [microscope.logging :as log]
-               [microscope.rabbit.async-helper :as helper]))
+   (require '[clojure.test :refer [is run-tests testing deftest]]
+            '[clojure.core.async :refer [chan >! timeout go]]
+            '[microscope.rabbit.async-helper :refer [def-async-test await! await-all!]]
+            '[langohr.consumers :as consumers]
+            '[langohr.basic :as basic]
+            '[langohr.core :as core])
    :cljs
-   (ns microscope.rabbit.queue-test
-     (:require-macros [cljs.core.async.macros :refer [go]])
-     (:require [clojure.test :refer-macros [deftest is testing run-tests async] :as tst]
-               [microscope.core :as components]
-               [microscope.io :as io]
-               [microscope.healthcheck :as health]
-               [microscope.future :as future]
-               [microscope.rabbit.queue :as rabbit]
-               [cljs.core.async :refer [chan >! timeout]]
-               [microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]
-               ;             [microscope.rabbit.mocks :as mocks]
-               [microscope.logging :as log]
-               [microscope.rabbit.async-helper :as helper])))
+   (require '[clojure.test :refer-macros [is testing run-tests async] :as tst]
+            '[cljs.core.async :refer [chan >! timeout]]
+            '[microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]))
 
 
-(defn raw-consume [channel name callback]
-  (. channel then (fn [c]
-                    (.consume c name (fn [msg]
-                                       (.ack c msg)
-                                       (callback (-> msg .-content .toString)))))))
+#?(:cljs
+   (defn raw-consume [channel name callback]
+     (. channel then (fn [c]
+                       (.consume c name (fn [msg]
+                                          (.ack c msg)
+                                          (callback (-> msg .-content .toString)))))))
+   :clj
+   (defn raw-consume [channel name callback]
+     (consumers/subscribe channel name (fn [_ meta msg]
+                                         (basic/ack channel (:delivery-tag meta))
+                                         (callback (String. msg))))))
 
 (defn in-future [f]
   (fn [future _] (future/map f future)))
 
+(defn logger-gen [logger-chan]
+  (fn [{:keys [cid]}]
+    (reify log/Log
+      (log [_ msg type data]
+           (go (>! logger-chan (assoc data
+                                      :message msg
+                                      :type type
+                                      :cid cid)))))))
+
 (defn subscribe-all! []
-  (let [test-queue (rabbit/queue "test" :auto-delete true :max-retries 1)
+  (let [test-queue (rabbit/queue "test" :max-retries 1)
         real-test-q (test-queue {:cid "FOO"})
-        result-queue (rabbit/queue "test-result" :auto-delete true)
+        result-queue (rabbit/queue "test-result")
         channel (:channel (result-queue {}))
         logger-chan (chan)
         all-msgs-chan (chan)
-        logger-gen (fn [{:keys [cid]}]
-                     (reify log/Log
-                       (log [_ msg type data]
-                         (go (>! logger-chan (assoc data
-                                                    :message msg
-                                                    :type type
-                                                    :cid cid))))))
         sub (components/subscribe-with :result-q result-queue
-                                       :logger logger-gen
+                                       :logger (logger-gen logger-chan)
                                        :test-queue test-queue
                                        :result-queue result-queue)
         send-msg (fn [msg {:keys [result-q]}]
@@ -110,19 +114,12 @@
     (is (= "{\"some\":\"msg\"}" payload))
     (is (re-find #"\"queue\":\"test\"" meta))))
 
-  ; (fact "attaches metadata into msg"
-  ;   (:meta (send-and-wait {:payload {:some "msg"}, :meta {:a 10}}))
-  ;   => (contains {:a 10, :cid "FOO.BAR"}))
-  ;
-  ; (fact "attaches CID between services"
-  ;   (get-in (send-and-wait {:payload "msg"}) [:meta :cid]) => "FOO.BAR")
-  ;
-  ; (against-background
-  ;  (components/generate-cid nil) => "FOO"
-  ;  (components/generate-cid "FOO") => "FOO.BAR"
-  ;  (components/generate-cid "FOO.BAR") => ..cid..
-  ;  (before :facts (prepare-tests))
-  ;  (after :facts (rabbit/disconnect!))))
+(def-async-test "attaches metadata into msg" {:teardown (rabbit/disconnect!)}
+  (let [{:keys [send! results]} (subscribe-all!)
+        _ (send! {:payload {:some "msg"}, :meta {:a 10}})
+        meta (:meta (await! results))]
+    (is (= 10 (:a meta)))
+    (is (re-matches #"FOO\.[\w\d]+" (:cid meta)))))
 
 (def-async-test "when message results in a failure process multiple times (till max-retries)"
   {:teardown (rabbit/disconnect!)}
@@ -137,7 +134,8 @@
       (is (= "\"error\"" (await! deadletter))))))
 
 #?(:clj
-   (defn raw-send! [queue msg])
+   (defn raw-send! [queue msg]
+     (basic/publish (:channel queue) (:name queue) "" msg))
    :cljs
    (defn raw-send! [queue msg]
      (. (:channel queue) then
@@ -150,18 +148,64 @@
     (raw-send! queue "some-strange-msg")
     (is (= "some-strange-msg" (await! deadletter)))))
 
+(defn is-closed? []
+  (let [c (chan)]
+    (go
+     (while (not-empty @rabbit/connections)
+       (Thread/sleep 100))
+     (>! c true))
+    c))
+
 (def-async-test "don't process message if old server died (but mark to retry later)"
   {:teardown (rabbit/disconnect!)}
 
-  (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
+  (let [{:keys [send! results all-messages deadletter queue]} (subscribe-all!)]
     (send! {:payload "fatal"})
-    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)])))))
+    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)]))))
+    (is (await! (is-closed?))))
 
-  (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
-    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)])))))
+  (let [{:keys [send! results all-messages deadletter queue]} (subscribe-all!)]
+    (is (= "fatal" (first (await-all! [all-messages (timeout 1000)]))))
+    (is (await! (is-closed?))))
 
   (let [{:keys [send! results all-messages deadletter]} (subscribe-all!)]
     (is (nil? (first (await-all! [all-messages (timeout 1000)]))))
     (is (= "\"fatal\"" (await! deadletter)))))
+
+; ; Mocks
+(defn a-function [test-q]
+  (let [upcases #(clojure.string/upper-case %)
+        publish #(io/send! %2 {:payload %1})
+        sub (components/subscribe-with :result-q (rabbit/queue "test-result")
+                                       :test-q test-q)]
+
+    (sub :test-q (fn [msg {:keys [result-q]}]
+                   (->> msg
+                        (future/map :payload)
+                        (future/map upcases)
+                        (future/map #(publish % result-q)))))))
+
+(deftest when-mocking-RabbitMQ-queue
+  (testing "subscribes correctly to messages"
+    (components/mocked
+      (a-function (rabbit/queue "test"))
+      (io/send! (:test @mocks/queues) {:payload "message"})
+      (is (= "MESSAGE"
+             (-> @mocks/queues :test-result :messages deref last :payload)))))
+
+  (testing "serializes message before sending it to mocked queue"
+    (components/mocked
+      (a-function (rabbit/queue "test"))
+      (io/send! (:test @mocks/queues) {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
+      (is (= [{:dt "2010-10-20T10:00:00Z"}]
+             (->> @mocks/queues :test :messages deref (map :payload))))))
+
+  (testing "ignores delayed messages"
+    (components/mocked
+      (a-function (rabbit/queue "test" :delayed true))
+      (io/send! (:test @mocks/queues) {:payload "msg one"})
+      (io/send! (:test @mocks/queues) {:payload "msg two", :meta {:x-delay 400}})
+      (is (= ["msg one"]
+             (->> @mocks/queues :test :messages deref (map :payload)))))))
 
 (run-tests)
