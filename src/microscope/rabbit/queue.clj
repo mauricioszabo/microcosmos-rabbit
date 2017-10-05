@@ -125,8 +125,8 @@
                                       (basic/qos prefetch-count))]
                     [connection channel])]
     (if-let [conn (get @connections host)]
-      conn
-      (get (swap! connections assoc host (connect!)) host))))
+      (second conn)
+      (get-in (swap! connections assoc host (connect!)) [host 1]))))
 
 (defn connection-to-queue [queue-name prefetch-count]
   (let [queue-host (get-in rabbit-config [:queues (keyword queue-name)])]
@@ -170,7 +170,7 @@
 
 (defn- real-rabbit-queue [name opts]
   (let [opts (merge default-queue-params opts)
-        [_ channel] (connection-to-queue name (:prefetch-count opts))]
+        channel (connection-to-queue name (:prefetch-count opts))]
 
     (define-queue channel name opts)
 
