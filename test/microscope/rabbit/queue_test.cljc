@@ -12,14 +12,14 @@
 
 #?(:clj
    (require '[clojure.test :refer [is run-tests testing deftest]]
-            '[clojure.core.async :refer [chan >! timeout go]]
+            '[clojure.core.async :refer [chan >! timeout go <!]]
             '[microscope.rabbit.async-helper :refer [def-async-test await! await-all!]]
             '[langohr.consumers :as consumers]
             '[langohr.basic :as basic]
             '[langohr.core :as core])
    :cljs
-   (require '[clojure.test :refer-macros [is testing run-tests async] :as tst]
-            '[cljs.core.async :refer [chan >! timeout]]
+   (require '[clojure.test :refer-macros [is testing run-tests async deftest]]
+            '[cljs.core.async :refer [chan >! timeout <!]]
             '[microscope.rabbit.async-helper :refer-macros [def-async-test await! await-all!]]))
 
 
@@ -152,7 +152,7 @@
   (let [c (chan)]
     (go
      (while (not-empty @rabbit/connections)
-       (Thread/sleep 100))
+       (<! (timeout 100)))
      (>! c true))
     c))
 
