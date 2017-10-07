@@ -1,6 +1,8 @@
 (ns microscope.rabbit.all-tests
-  (:require [cljs.nodejs :as nodejs]))
+  (:require [cljs.nodejs :as nodejs]
+            [microscope.rabbit.queue-test]
+            [clojure.test :refer [run-tests]]))
 
 (nodejs/enable-util-print!)
 
-(require 'microscope.rabbit.queue-test)
+(run-tests 'microscope.rabbit.queue-test)

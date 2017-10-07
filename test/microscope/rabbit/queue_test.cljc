@@ -172,9 +172,9 @@
     (is (nil? (first (await-all! [all-messages (timeout 1000)]))))
     (is (= "\"fatal\"" (await! deadletter)))))
 
-; ; Mocks
+; Mocks
 (defn a-function [test-q]
-  (let [upcases #(clojure.string/upper-case %)
+  (let [upcases #(cond-> % (string? %) clojure.string/upper-case)
         publish #(io/send! %2 {:payload %1})
         sub (components/subscribe-with :result-q (rabbit/queue "test-result")
                                        :test-q test-q)]
@@ -183,29 +183,61 @@
                    (->> msg
                         (future/map :payload)
                         (future/map upcases)
-                        (future/map #(publish % result-q)))))))
+                        (future/intercept #(publish % result-q)))))))
 
-(deftest when-mocking-RabbitMQ-queue
-  (testing "subscribes correctly to messages"
-    (components/mocked
-      (a-function (rabbit/queue "test"))
-      (io/send! (:test @mocks/queues) {:payload "message"})
-      (is (= "MESSAGE"
-             (-> @mocks/queues :test-result :messages deref last :payload)))))
+#?(:clj
+   (deftest when-mocking-RabbitMQ-queue
+     (testing "subscribes correctly to messages"
+       (components/mocked
+         (a-function (rabbit/queue "test"))
+         (io/send! (:test @mocks/queues) {:payload "message"})
+         (is (= "MESSAGE"
+                (-> @mocks/queues :test-result :messages deref last :payload)))))
 
-  (testing "serializes message before sending it to mocked queue"
-    (components/mocked
-      (a-function (rabbit/queue "test"))
-      (io/send! (:test @mocks/queues) {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
-      (is (= [{:dt "2010-10-20T10:00:00Z"}]
-             (->> @mocks/queues :test :messages deref (map :payload))))))
+     (testing "serializes message before sending it to mocked queue"
+       (components/mocked
+         (a-function (rabbit/queue "test"))
+         (io/send! (:test @mocks/queues) {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
+         (is (= [{:dt "2010-10-20T10:00:00Z"}]
+                (->> @mocks/queues :test :messages deref (map :payload))))))
 
-  (testing "ignores delayed messages"
-    (components/mocked
-      (a-function (rabbit/queue "test" :delayed true))
-      (io/send! (:test @mocks/queues) {:payload "msg one"})
-      (io/send! (:test @mocks/queues) {:payload "msg two", :meta {:x-delay 400}})
-      (is (= ["msg one"]
-             (->> @mocks/queues :test :messages deref (map :payload)))))))
+     (testing "ignores delayed messages"
+       (components/mocked
+         (a-function (rabbit/queue "test" :delayed true))
+         (io/send! (:test @mocks/queues) {:payload "msg one"})
+         (io/send! (:test @mocks/queues) {:payload "msg two", :meta {:x-delay 400}})
+         (is (= ["msg one"]
+                (->> @mocks/queues :test :messages deref (map :payload)))))))
+   :cljs
+   (def-async-test "when mocking RabbitMQ queue" {}
+     (let [channel (chan)
+           done! #(go (>! channel :done))]
+       (testing "subscribes correctly to messages"
+         (components/mocked
+           (a-function (rabbit/queue "test"))
+           (.then (io/send! (:test @mocks/queues) {:payload "message"}) done!)
+           (await! channel)
+           (is (= "MESSAGE"
+                  (-> @mocks/queues :test-result :messages deref last :payload)))))
 
-(run-tests)
+       (testing "serializes message before sending it to mocked queue"
+         (components/mocked
+           (a-function (rabbit/queue "test"))
+           (.then (io/send! (:test @mocks/queues)
+                            {:payload {:dt #inst "2010-10-20T10:00:00Z"}})
+                  done!)
+           (await! channel)
+           (is (= [{:dt "2010-10-20T10:00:00.000Z"}]
+                  (->> @mocks/queues :test :messages deref (map :payload))))))
+
+       (testing "ignores delayed messages"
+         (components/mocked
+           (a-function (rabbit/queue "test" :delayed true))
+           (.then (io/send! (:test @mocks/queues) {:payload "msg one"}) done!)
+           (await! channel)
+           (.then (io/send! (:test @mocks/queues) {:payload "msg two",
+                                                   :meta {:x-delay 400}})
+                  done!)
+           (await! channel)
+           (is (= ["msg one"]
+                  (->> @mocks/queues :test :messages deref (map :payload)))))))))

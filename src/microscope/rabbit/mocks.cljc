@@ -2,6 +2,31 @@
   (:require [microscope.io :as io]))
 
 (declare mocked-rabbit-queue)
+
+#?(:clj
+   (defn- send-to-queue! [self {:keys [payload meta] :or {meta {}}}]
+     (let [cid (:cid self)
+           json-payload (-> payload io/serialize-msg io/deserialize-msg)
+           queue (if (:rpc? self)
+                   (mocked-rabbit-queue (str name "-response") cid true false)
+                   self)]
+       (when-not (and (:delayed? self) (some-> meta :x-delay (> 0)))
+         (swap! (:messages queue) conj {:payload json-payload
+                                        :meta (assoc meta :cid cid)}))))
+   :cljs
+   (defn- send-to-queue! [self {:keys [payload meta] :or {meta {}}}]
+     (js/Promise.
+      (fn [resolve reject]
+       (if (and (:delayed? self) (some-> meta :x-delay (> 0)))
+         (resolve true)
+         (swap! (:messages self) conj {:payload (-> payload
+                                                    io/serialize-msg
+                                                    io/deserialize-msg)
+                                       :meta (assoc meta
+                                                    :cid (:cid self)
+                                                    :resolve resolve
+                                                    :reject reject)}))))))
+
 (defrecord FakeQueue [name cid rpc? delayed? messages]
   io/IO
 
@@ -14,20 +39,18 @@
                                                         (some-> meta :x-delay (> 0)))))
                                      (function msg))))))
 
-  (send! [self {:keys [payload meta] :or {meta {}}}]
-    (let [json-payload (-> payload io/serialize-msg io/deserialize-msg)]
-      (when-not (and delayed? (some-> meta :x-delay (> 0)))
-        (let [queue (if rpc?
-                      (mocked-rabbit-queue (str name "-response") cid rpc? delayed?)
-                      self)]
-          (swap! (:messages queue) conj {:payload json-payload
-                                         :meta (assoc meta :cid cid)})))))
+  (send! [self msg]
+    (send-to-queue! self msg))
 
-  (ack! [_ _])
-  (reject! [self msg ex])
+  (ack! [_ {:keys [meta]}]
+    (when-let [resolve (:resolve meta)] (resolve true)))
+  (reject! [self {:keys [meta]} ex]
+    (when-let [reject (:reject meta)] (reject ex)))
+
   (log-message [_ _ _]))
 
 (def queues (atom {}))
+
 (defn mocked-rabbit-queue [name cid rpc? delayed?]
   (let [name-k (keyword name)
         mock-queue (get @queues name-k (->FakeQueue name cid rpc? delayed? (atom [])))]
