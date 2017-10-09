@@ -5,7 +5,7 @@
             :url "https://opensource.org/licenses/MIT"}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [com.novemberain/langohr "3.6.1"]
-                 [microscope "0.2.0-SNAPSHOT"]]
+                 [microscope "0.2.0"]]
 
   :profiles {:dev {:src-paths ["dev"]
                    :dependencies [[midje "1.8.3"]]
