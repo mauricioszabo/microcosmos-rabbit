@@ -3,7 +3,7 @@
             [microscope.healthcheck :as health]
             [microscope.future :as future]
             [microscope.logging :as log]
-            ; [microscope.rabbit.mocks :as mocks]
+            [microscope.rabbit.mocks :as mocks]
             [microscope.env :as env]
             [clojure.walk :as walk]))
 
@@ -236,10 +236,9 @@ one, using *fanout*. If `:route-to` is omitted, it creates a queue with the same
 as the exchange, then binds one to another.
 "
   [name & {:as opts}]
-;   (mocks/clear-mocked-env!)
+  (mocks/clear-mocked-env!)
   (let [queue (delay (real-rabbit-queue name opts))]
     (fn [{:keys [cid mocked]}]
       (if mocked
-        nil
-;         (mocks/mocked-rabbit-queue name cid false (:delayed opts))
+        (mocks/mocked-rabbit-queue name cid false (:delayed opts))
         (assoc @queue :cid cid)))))
