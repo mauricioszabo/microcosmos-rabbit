@@ -1,10 +1,8 @@
 #?(:cljs
     (ns microscope.rabbit.async-helper
       (:require-macros [cljs.core.async.macros])
-                      ;  [expectations :refer [expect]])
       (:require [cljs.core.async :refer [close! chan >! <! alts!]]
                 [clojure.test :refer-macros [deftest async testing]]
-                ; [cljs.core.async.macros :include-macros true]
                 [clojure.string :as str]))
    :clj
     (ns microscope.rabbit.async-helper

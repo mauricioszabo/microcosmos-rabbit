@@ -37,7 +37,7 @@
 
 (defn- real-rabbit-queue [name opts]
   (let [opts (merge rabbit/default-queue-params opts)
-        [_ channel] (rabbit/connection-to-queue name (:prefetch-count opts))]
+        channel (rabbit/connection-to-queue name (:prefetch-count opts))]
     (rabbit/define-queue channel name opts)
     (->Queue channel name nil nil)))
 

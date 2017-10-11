@@ -8,47 +8,6 @@
             [clojure.walk :as walk]))
 
 (def ^:private amqp (js/require "amqplib"))
-; (generators/add-encoder LongString generators/encode-str)
-;
-; (defn- parse-meta [meta]
-;   (let [normalize-kv (fn [[k v]] [(keyword k) (if (instance? LongString v)
-;                                                 (str v)
-;                                                 v)])
-;         headers (->> meta
-;                      :headers
-;                      (map normalize-kv)
-;                      (into {}))]
-;     (-> headers (merge meta) (dissoc :headers))))
-;
-; (def rabbit-default-meta [:cluster-id :app-id :message-id :expiration :type :user-id
-;                           :delivery-tag :delivery-mode :priority :redelivery?
-;                           :routing-key :content-type :persistent? :reply-to
-;                           :content-encoding :correlation-id :exchange :timestamp])
-;
-; (defn- normalize-headers [meta]
-;   (let [headers (->> meta
-;                      (map (fn [[k v]] [(clj/name k) v]))
-;                      (into {}))]
-;     (apply dissoc headers (map name rabbit-default-meta))))
-;
-; (defn parse-payload [payload]
-;   (-> payload (String. "UTF-8") io/deserialize-msg))
-;
-; (defn- retries-so-far [meta]
-;   (get-in meta [:headers "retries"] 0))
-;
-; (defn ack-msg [queue meta]
-;   (basic/ack (:channel queue) (:delivery-tag meta)))
-;
-; (defn requeue-msg [queue payload meta]
-;   (basic/publish (:channel queue)
-;                  ""
-;                  (:name queue)
-;                  payload
-;                  (update meta :headers (fn [hash-map]
-;                                          (let [map (into {} hash-map)]
-;                                            (assoc map "retries"
-;                                                   (-> meta retries-so-far inc)))))))
 (defn- normalize-meta [meta]
   (cond-> meta
           (not (:expiration meta)) (dissoc :expiration)
@@ -171,25 +130,7 @@
                            :prefetch-count (* 5 (-> os .cpus .-length))
                            :durable true
                            :ttl (* 24 60 60 1000)})
-;
-; (defn define-queue [channel name opts]
-;   (let [dead-letter-name (str name "-dlx")
-;         dead-letter-q-name (str name "-deadletter")]
-;     (queue/declare channel name (-> opts
-;                                     (dissoc :max-retries :ttl :prefetch-count :route-to)
-;                                     (assoc :arguments {"x-dead-letter-exchange" dead-letter-name
-;                                                        "x-message-ttl" (:ttl opts)})))
-;     (queue/declare channel dead-letter-q-name
-;                    {:durable true :auto-delete false :exclusive false})
-;     (exchange/fanout channel dead-letter-name {:durable true})
-;     (queue/bind channel dead-letter-q-name dead-letter-name)))
-;
-; (defn- route-exchange [channel exchange-name queue-names opts]
-;   (doseq [queue-name queue-names]
-;     (do
-;       (define-queue channel queue-name opts)
-;       (queue/bind channel queue-name exchange-name))))
-;
+
 (defn- real-rabbit-queue [name opts]
   (let [dead-letter-name (str name "-dlx")
         dead-letter-q-name (str name "-deadletter")

@@ -28,9 +28,19 @@
                                    :pretty-print true
                                    :target :nodejs}}
                        {:source-paths ["src" "test"]
+                        :id "test"
+                        :compiler {:output-to "target/test.js"
+                                   :optimizations :simple
+                                   :hashbang false
+                                   :language-in :ecmascript5
+                                   :output-wrapper true
+                                   :output-dir "target/js-test"
+                                   :pretty-print true
+                                   :target :nodejs}}
+                       {:source-paths ["src" "test"]
                         :id "dev"
                         :figwheel true
-                        :compiler {:output-to "target/main.js"
+                        :compiler {:output-to "target/dev.js"
                                    :output-dir "target/js"
                                    :main microscope.rabbit.all-tests
                                    :optimizations :none
