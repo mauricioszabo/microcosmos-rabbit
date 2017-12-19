@@ -177,7 +177,7 @@
     (if (:delayed opts)
       (exchange/declare channel name "x-delayed-message"
                         {:arguments {"x-delayed-type" "direct"}})
-      (exchange/declare channel name "fanout"))
+      (exchange/declare channel name "fanout" {:durable true}))
 
     (route-exchange channel name (or (:route-to opts) [name]) opts)
     (->Queue channel name (:max-retries opts) nil)))
