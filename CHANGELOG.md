@@ -1,3 +1,6 @@
+# 0.2.1
+* Exchanges are now created with `durable` option
+
 # 0.2.0
 * Removed deprecated `rabbit/queues`
 * Normalized logs to use our schema (meta and payload, as strings)

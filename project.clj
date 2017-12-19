@@ -1,4 +1,4 @@
-(defproject microscope/rabbit "0.2.0"
+(defproject microscope/rabbit "0.2.1"
   :description "RabbitMQ implementation for Microscope"
   :url "https://github.com/acessocard/microscope"
   :license {:name "MIT License"
